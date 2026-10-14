@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>SAAHI Live Alert</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700..800&family=Hanken+Grotesk:wght@400;600;700&display=swap">
+<style>
+  :root{--paper:#FBF8FF;--ink:#1C1633;--muted:#6B6585;--sage:#C7EBD3;--marigold:#FFC24B;--lilac:#E4DAFB;--sos:#E8372F;--sos-deep:#B4211B;
+    --display:"Bricolage Grotesque","Arial Black",system-ui,sans-serif;--body:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 var(--body);
+    padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+  main{max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  .logo{font:800 22px var(--display);letter-spacing:-.02em}
+  h1{font:800 32px/1.05 var(--display);letter-spacing:-.02em;margin:4px 0 0;text-wrap:balance}
+  .sub{color:var(--muted);margin:0}
+  .card{border:2px solid var(--ink);border-radius:20px;box-shadow:3px 3px 0 var(--ink);padding:14px;background:var(--paper)}
+  .alert{background:var(--sos);color:#fff}
+  .alert b{font-size:16px}
+  .map{border:2px solid var(--ink);border-radius:20px;overflow:hidden;box-shadow:3px 3px 0 var(--ink);aspect-ratio:4/3;background:var(--sage);max-width:100%}
+  .map iframe{width:100%;height:100%;border:0;display:block}
+  .meta{font-size:14px}
+  .btn{display:block;width:100%;text-align:center;border:2px solid var(--ink);border-radius:14px;padding:14px;font:700 16px var(--body);box-shadow:3px 3px 0 var(--ink);
+    background:var(--marigold);color:var(--ink);text-decoration:none;cursor:pointer}
+  .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+  .btn.ghost{background:var(--paper)}.btn.red{background:var(--sos);color:#fff}.btn.ok{background:var(--sage)}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .who{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:2px solid var(--ink);border-radius:999px;padding:6px 14px;font:700 14px var(--body);background:var(--paper);cursor:pointer;color:var(--ink)}
+  .chip[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+  label{font-weight:700;font-size:14px;display:block;margin-bottom:6px}
+  input{width:100%;border:2px solid var(--ink);border-radius:14px;padding:12px;font:500 16px var(--body);background:#fff;color:var(--ink)}
+  ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+  li{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+  .pill{font-weight:700;font-size:12px;border-radius:999px;padding:2px 10px;background:var(--lilac);white-space:nowrap}
+  .pill.ack{background:var(--sage)}
+  .note{font-size:13px;color:var(--muted);border:2px dashed #B8B2CC;border-radius:14px;padding:10px 12px}
+  .ended{background:var(--sage)}
+  button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--marigold);outline-offset:2px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">saahi.</div>
+  <div id="loading" class="sub">Loading the alert…</div>
+  <div id="error" class="card" hidden></div>
+
+  <section id="live" hidden>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <h1 id="title">Someone needs help</h1>
+        <p class="sub" id="since"></p>
+      </div>
+      <div id="duress" class="card alert" hidden><b>She may have been forced to cancel this alert.</b><br>Her phone might show it as cancelled. Keep going and call 112.</div>
+      <div class="map" id="mapBox"><iframe id="map" title="Her last known location" loading="lazy" referrerpolicy="no-referrer"></iframe></div>
+      <div class="meta" id="locMeta"></div>
+      <div class="row">
+        <a class="btn" id="mapsLink" target="_blank" rel="noopener">Open in Google Maps</a>
+        <a class="btn red" href="tel:112">Call 112</a>
+      </div>
+
+      <div class="card" id="respond">
+        <label>Who are you?</label>
+        <div class="who" id="who"></div>
+        <div id="ackForm" hidden style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+          <div><label for="msg">Message to her</label><input id="msg" value="On my way" maxlength="140"></div>
+          <button class="btn" id="ackBtn" type="button">I'm on it</button>
+        </div>
+        <p class="sub" id="ackDone" hidden style="margin-top:10px">She can see you're on it. Keep this page open; it updates every 10 seconds.</p>
+      </div>
+
+      <div class="card">
+        <label>Who has responded</label>
+        <ul id="list"></ul>
+      </div>
+      <p class="note">Don't confront anyone yourself. If you can't reach her within a few minutes, call 112 and share this location. This page is private to people she alerted; please don't forward it.</p>
+    </div>
+  </section>
+
+  <section id="over" class="card ended" hidden>
+    <h1 style="font-size:26px">This alert has ended</h1>
+    <p class="sub" style="color:var(--ink)">She marked herself safe. Her location is no longer shared.</p>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script>
+(function () {
+  var cfg = window.SAAHI_CONFIG || {};
+  var token = new URLSearchParams(location.search).get("t") || "";
+  var api = (cfg.supabaseUrl || "").replace(/\/$/, "") + "/functions/v1/alert-public";
+  var me = null;
+  try { me = sessionStorage.getItem("saahi.me." + token); } catch (e) {}
+  var acked = false;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function headers() {
+    return { "Content-Type": "application/json", apikey: cfg.anonKey || "", Authorization: "Bearer " + (cfg.anonKey || "") };
+  }
+  function showError(msg) {
+    $("loading").hidden = true; $("live").hidden = true;
+    var e = $("error"); e.hidden = false; e.textContent = msg;
+  }
+  function ago(iso) {
+    if (!iso) return "";
+    var m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    return m <= 0 ? "just now" : m === 1 ? "1 min ago" : m + " min ago";
+  }
+  function label(s) {
+    return { queued: "Not yet", sent: "Texted", opened: "Opened link", acknowledged: "On it", failed: "Not delivered" }[s] || s;
+  }
+  function post(body) {
+    return fetch(api, { method: "POST", headers: headers(), body: JSON.stringify(Object.assign({ t: token }, body)) });
+  }
+
+  function render(d) {
+    $("loading").hidden = true;
+    if (d.status !== "active") { $("live").hidden = true; $("over").hidden = false; return; }
+    $("live").hidden = false; $("over").hidden = true;
+    $("title").textContent = d.name + " needs help";
+    $("since").textContent = "Alert started " + new Date(d.started_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + (d.battery != null ? " · her battery " + Math.round(d.battery * 100) + "%" : "");
+    $("duress").hidden = !d.possibly_forced_cancel;
+    if (d.location) {
+      var lat = d.location.lat, lng = d.location.lng, dl = 0.004;
+      var src = "https://www.openstreetmap.org/export/embed.html?bbox=" + (lng - dl) + "%2C" + (lat - dl) + "%2C" + (lng + dl) + "%2C" + (lat + dl) + "&layer=mapnik&marker=" + lat + "%2C" + lng;
+      if ($("map").getAttribute("src") !== src) $("map").setAttribute("src", src);
+      $("mapsLink").href = "https://maps.google.com/?q=" + lat + "," + lng;
+      $("mapBox").hidden = false; $("mapsLink").hidden = false;
+      $("locMeta").textContent = "Accurate to about " + Math.round(d.location.accuracy || 0) + " m · updated " + ago(d.location.at);
+    } else {
+      $("mapBox").hidden = true; $("mapsLink").hidden = true;
+      $("locMeta").textContent = "Waiting for her phone to send a location.";
+    }
+    var who = $("who"); who.innerHTML = "";
+    d.recipients.forEach(function (r) {
+      var b = document.createElement("button");
+      b.className = "chip"; b.type = "button"; b.textContent = r.name;
+      b.setAttribute("aria-pressed", String(me === r.id));
+      b.onclick = function () {
+        me = r.id;
+        try { sessionStorage.setItem("saahi.me." + token, r.id); } catch (e) {}
+        post({ action: "open", recipient_id: r.id }).catch(function () {});
+        render(d);
+      };
+      who.appendChild(b);
+      if (r.id === me && r.status === "acknowledged") acked = true;
+    });
+    if (!d.recipients.length) who.textContent = "No names on this alert.";
+    $("ackForm").hidden = !me || acked;
+    $("ackDone").hidden = !acked;
+    var list = $("list"); list.innerHTML = "";
+    d.recipients.forEach(function (r) {
+      var li = document.createElement("li");
+      var n = document.createElement("span"); n.textContent = r.name + (r.message ? " · “" + r.message + "”" : "");
+      var p = document.createElement("span"); p.className = "pill" + (r.status === "acknowledged" ? " ack" : ""); p.textContent = label(r.status);
+      li.appendChild(n); li.appendChild(p); list.appendChild(li);
+    });
+  }
+
+  function load() {
+    if (!/^[a-f0-9]{36}$/.test(token)) return showError("This link isn't complete. Ask her, or the person who sent it, for the full link.");
+    if (!cfg.supabaseUrl || cfg.supabaseUrl.indexOf("YOUR-") !== -1) return showError("This page isn't set up yet: add your Supabase URL and key to config.js.");
+    fetch(api + "?t=" + token, { headers: headers() })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) { if (!res.ok) return showError(res.j.error || "Couldn't load this alert."); render(res.j); })
+      .catch(function () { showError("No connection. If you can't load this, call her or 112."); });
+  }
+
+  $("ackBtn").onclick = function () {
+    if (!me) return;
+    $("ackBtn").disabled = true;
+    post({ action: "ack", recipient_id: me, message: $("msg").value.slice(0, 140) })
+      .then(function () { acked = true; load(); })
+      .catch(function () { $("ackBtn").disabled = false; });
+  };
+
+  load();
+  setInterval(load, 10000);
+})();
+</script>
+</body>
+</html>

@@ -1,25 +1,86 @@
 {
   "expo": {
-    "name": "saahi",
+    "name": "SAAHI",
     "slug": "saahi",
-    "version": "1.0.0",
+    "scheme": "saahi",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#FBF8FF",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "in.saahi.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["location", "audio", "remote-notification"]
+      }
     },
     "android": {
+      "package": "in.saahi.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FBF8FF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "permissions": ["VIBRATE", "RECEIVE_BOOT_COMPLETED"],
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "During an SOS or a Walk with me journey, SAAHI shares your live location with the people you chose, even if your screen is locked.",
+          "locationWhenInUsePermission": "SAAHI shares your location with your trusted circle when you send an SOS or start a journey.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "During an SOS, SAAHI can record audio into your private vault."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Add screenshots and photos to your private evidence vault.",
+          "cameraPermission": "Take photos for your private evidence vault."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E8372F"
+        }
+      ],
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#FBF8FF"
+        }
+      ],
+      "expo-localization",
+      "expo-sharing"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
     }
   }
 }
