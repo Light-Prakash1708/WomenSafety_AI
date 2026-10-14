@@ -1,0 +1,17 @@
+{
+  "name": "SAAHI",
+  "short_name": "SAAHI",
+  "description": "A safety network that remembers the pattern, signals quietly and shows you help is coming.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FBF8FF",
+  "theme_color": "#FBF8FF",
+  "categories": ["lifestyle", "social", "utilities"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

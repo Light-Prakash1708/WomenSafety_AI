@@ -8,6 +8,7 @@ import { Button, Card, Chip, Screen, Section, TopBar, s as ui } from "@/componen
 import { useApp } from "@/lib/app-state";
 import { nearbyCells } from "@/lib/geo";
 import type { Lang } from "@/lib/i18n";
+import { isWeb } from "@/lib/layout";
 import { useSos } from "@/lib/sos";
 import { supabase } from "@/lib/supabase";
 import { c, f, hardShadow } from "@/lib/theme";
@@ -136,7 +137,7 @@ export default function Home() {
 
       <View style={{ alignItems: "center", marginVertical: 24, gap: 12 }}>
         <SosButton onFire={() => sos.start("hold")} sublabel={t("holdSos")} />
-        <Text style={{ fontFamily: f.body, fontSize: 13, color: c.muted, textAlign: "center" }}>{t("sosHint")}</Text>
+        <Text style={{ fontFamily: f.body, fontSize: 13, color: c.muted, textAlign: "center" }}>{isWeb ? t("sosHintWeb") : t("sosHint")}</Text>
       </View>
 
       <View style={{ flexDirection: "row", gap: 12 }}>

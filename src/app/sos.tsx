@@ -1,10 +1,11 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { IconMic, IconPeople, IconPin, IconSignal } from "@/components/icons";
 import { PinPad } from "@/components/PinPad";
 import { useApp } from "@/lib/app-state";
+import { isWeb } from "@/lib/layout";
 import { useSos } from "@/lib/sos";
 import type { Recipient } from "@/lib/supabase";
 import { c, f } from "@/lib/theme";
@@ -19,7 +20,7 @@ const STATUS: Record<Recipient["status"], { label: string; tone: "wait" | "sent"
 
 export default function SosScreen() {
   const router = useRouter();
-  const { t, contacts } = useApp();
+  const { t, contacts, profile } = useApp();
   const sos = useSos();
   const [pinOpen, setPinOpen] = useState(false);
   const [ended, setEnded] = useState<null | "cancel" | "duress">(null);
@@ -33,12 +34,16 @@ export default function SosScreen() {
 
   if (ended) {
     return (
-      <SafeAreaView style={[st.root, { justifyContent: "center", paddingHorizontal: 24 }]}>
+      <SafeAreaView style={[st.root, { justifyContent: "center", paddingHorizontal: 24, alignItems: "center" }]}>
+        <View style={{ width: "100%", maxWidth: 480 }}>
         <Text style={st.title}>{t("cancelled")}</Text>
         <Text style={[st.sub, { marginBottom: 28 }]}>
           {ended === "cancel" ? "Sharing has stopped. Any audio was saved to your vault." : "Sharing has stopped."}
         </Text>
-        {ended === "cancel" && contacts.length > 0 && (
+        {ended === "cancel" && contacts.length > 0 && isWeb && (
+          <SendOptions message={`${(profile?.display_name || "I").split(" ")[0]} is safe now. Thank you. (SAAHI)`} title="Tell your circle you're safe" copyLabel="Copy message" />
+        )}
+        {ended === "cancel" && contacts.length > 0 && !isWeb && (
           <Pressable style={[st.btn, st.safe]} onPress={sos.sendSafeMessage}>
             <Text style={[st.btnTxt, { color: "#06210F" }]}>Tell my circle I'm safe</Text>
           </Pressable>
@@ -46,6 +51,7 @@ export default function SosScreen() {
         <Pressable style={[st.btn, { marginTop: 10 }]} onPress={() => router.dismissTo("/(tabs)")}>
           <Text style={st.btnTxt}>Done</Text>
         </Pressable>
+        </View>
       </SafeAreaView>
     );
   }
@@ -74,12 +80,14 @@ export default function SosScreen() {
         : sos.sms === "cancelled"
           ? "Text not sent. Tap to try again."
           : sos.sms === "unavailable"
-            ? "This phone can't send texts"
+            ? isWeb
+              ? "Send it to each person below"
+              : "This phone can't send texts"
             : "Preparing text message";
 
   return (
     <SafeAreaView style={st.root} edges={["top", "bottom"]}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24, width: "100%", maxWidth: 560, alignSelf: "center" }}>
         <View style={st.pulseWrap}>
           {[0, 0.5].map((d) => (
             <Animated.View
@@ -120,8 +128,10 @@ export default function SosScreen() {
               status={
                 sos.sms === "sent"
                   ? { label: "Sent", tone: "sent" }
-                  : sos.sms === "cancelled" || sos.sms === "unavailable"
-                    ? { label: "Not sent", tone: "fail" }
+                  : sos.sms === "unavailable" && isWeb
+                    ? { label: "Your turn", tone: "sent" }
+                    : sos.sms === "cancelled" || sos.sms === "unavailable"
+                      ? { label: "Not sent", tone: "fail" }
                     : { label: "Waiting", tone: "wait" }
               }
             />
@@ -137,6 +147,8 @@ export default function SosScreen() {
           ))}
           <Row icon={<Text style={{ fontFamily: f.bodyBold, color: c.nightFg }}>112</Text>} title="112 India" sub="Police, ambulance and fire. Tap the button below to call." status={{ label: "Ready", tone: "wait" }} />
         </View>
+
+        {sos.sms === "unavailable" && contacts.length > 0 && <SendOptions message={sos.messageText} />}
 
         {sos.recording && (
           <View style={st.rec}>
@@ -174,6 +186,46 @@ export default function SosScreen() {
         />
       )}
     </SafeAreaView>
+  );
+}
+
+/** When this device can't send texts (a computer, a tablet), give one tap per person instead. */
+function SendOptions({ message, title = "Send your alert", copyLabel = "Copy alert message" }: { message: string; title?: string; copyLabel?: string }) {
+  const { contacts } = useApp();
+  const [copied, setCopied] = useState(false);
+  const text = encodeURIComponent(message);
+  const copy = async () => {
+    try {
+      await (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(message);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <View style={st.send}>
+      <Text style={st.rowTitle}>{title}</Text>
+      <Text style={[st.rowSub, { marginBottom: 10 }]}>Each button opens a message ready to send.</Text>
+      {contacts.map((ct) => {
+        const digits = ct.phone.replace(/\D/g, "");
+        return (
+          <View key={ct.id} style={st.sendRow}>
+            <Text style={[st.rowTitle, { flex: 1 }]} numberOfLines={1}>
+              {ct.name}
+            </Text>
+            <Pressable style={[st.chip, { backgroundColor: "#25D366" }]} accessibilityRole="link" onPress={() => Linking.openURL(`https://wa.me/${digits}?text=${text}`)}>
+              <Text style={[st.chipTxt, { color: "#06210F" }]}>WhatsApp</Text>
+            </Pressable>
+            <Pressable style={st.chip} accessibilityRole="link" onPress={() => Linking.openURL(`sms:${ct.phone}?&body=${text}`)}>
+              <Text style={st.chipTxt}>Text</Text>
+            </Pressable>
+          </View>
+        );
+      })}
+      <Pressable style={[st.btn, { marginTop: 10 }]} onPress={copy} accessibilityRole="button">
+        <Text style={st.btnTxt}>{copied ? "Copied. Paste it anywhere." : copyLabel}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -216,4 +268,8 @@ const st = StyleSheet.create({
   btn: { borderRadius: 14, paddingVertical: 15, alignItems: "center", backgroundColor: c.night2, borderWidth: 1.5, borderColor: "rgba(242,238,255,0.2)" },
   safe: { backgroundColor: "#2FBF6B", borderColor: "#2FBF6B" },
   btnTxt: { fontFamily: f.bodyBold, fontSize: 15, color: c.nightFg },
+  send: { marginTop: 14, backgroundColor: c.night2, borderRadius: 16, padding: 14, borderWidth: 1.5, borderColor: "rgba(255,194,75,0.45)" },
+  sendRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
+  chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "rgba(242,238,255,0.12)" },
+  chipTxt: { fontFamily: f.bodyBold, fontSize: 12.5, color: c.nightFg },
 });

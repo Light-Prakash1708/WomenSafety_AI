@@ -1,11 +1,18 @@
-# Publishes /web (the landing page and the SOS tracking page) to GitHub Pages.
-# Turn on Pages in repo Settings > Pages > Source: GitHub Actions.
-name: Deploy web pages
+# Builds the SAAHI web app and publishes it to GitHub Pages together with the
+# contact tracking page:
+#   https://<user>.github.io/<repo>/          the app (installable)
+#   https://<user>.github.io/<repo>/track/    the page contacts open from an SOS text
+#
+# One-time setup in the GitHub repo:
+#   Settings > Pages > Source: GitHub Actions
+#   Settings > Secrets and variables > Actions > Variables:
+#     SUPABASE_URL       https://YOUR-PROJECT-REF.supabase.co
+#     SUPABASE_ANON_KEY  your anon / publishable key (safe to publish)
+name: Deploy web app
 
 on:
   push:
     branches: [main]
-    paths: ["web/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -18,16 +25,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BASE_PATH: /${{ github.event.repository.name }}
+      SITE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the web app
+        env:
+          EXPO_BASE_URL: ${{ env.BASE_PATH }}
+          EXPO_PUBLIC_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_TRACK_PAGE_URL: ${{ env.SITE }}/track
+        run: npx expo export --platform web --output-dir site
+      - name: Add the tracking page and SPA fallback
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p site/track
+          cp web/track/index.html site/track/index.html
+          printf 'window.SAAHI_CONFIG = { supabaseUrl: "%s", anonKey: "%s" };\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > site/track/config.js
+          # Give every screen a real page so refreshes and bookmarks return 200, not 404.
+          for r in sign-in onboarding pattern walk vault support sos calculator ghost-call entry contacts settings report-area; do
+            mkdir -p "site/$r" && cp site/index.html "site/$r/index.html"
+          done
+          # Anything else (e.g. /guardian/<id>) still opens the app through 404.html.
+          cp site/index.html site/404.html
+          touch site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: web
       - id: deployment
         uses: actions/deploy-pages@v4

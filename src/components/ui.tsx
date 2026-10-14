@@ -15,6 +15,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CONTENT_MAX, useLayout } from "@/lib/layout";
 import { c, f, hardShadow, radius } from "@/lib/theme";
 
 export function Screen({
@@ -30,15 +31,27 @@ export function Screen({
   padded?: boolean;
   edges?: ("top" | "bottom")[];
 }) {
-  const inner = padded ? { paddingHorizontal: 20, paddingBottom: 32 } : undefined;
+  const { wide } = useLayout();
+  // One centred column on every screen size, so phones and laptops share the same composition.
+  const column: ViewStyle = {
+    width: "100%",
+    maxWidth: CONTENT_MAX,
+    alignSelf: "center",
+    ...(padded ? { paddingHorizontal: wide ? 32 : 20, paddingBottom: wide ? 48 : 32, paddingTop: wide ? 24 : 0 } : null),
+  };
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: bg }} edges={edges}>
       {scroll ? (
-        <ScrollView contentContainerStyle={inner} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {children}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={wide}
+        >
+          <View style={column}>{children}</View>
         </ScrollView>
       ) : (
-        <View style={[{ flex: 1 }, inner]}>{children}</View>
+        <View style={[{ flex: 1 }, column]}>{children}</View>
       )}
     </SafeAreaView>
   );
@@ -46,10 +59,13 @@ export function Screen({
 
 export function TopBar({ title, right, onLogoLongPress }: { title: string; right?: ReactNode; onLogoLongPress?: () => void }) {
   const router = useRouter();
+  const { wide } = useLayout();
+  // On wide screens the side rail carries the brand, so Home shows no second logo.
+  const hideBrand = wide && title === "saahi.";
   return (
     <View style={s.topbar}>
-      <Pressable onLongPress={onLogoLongPress} delayLongPress={900} accessible={false}>
-        <Text style={s.logo}>{title}</Text>
+      <Pressable testID="logo" onLongPress={onLogoLongPress} delayLongPress={900} accessible={false}>
+        <Text style={[s.logo, hideBrand && { opacity: 0 }]}>{title}</Text>
       </Pressable>
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
         {right}

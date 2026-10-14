@@ -3,6 +3,7 @@ import { useState } from "react";
 import { View } from "react-native";
 import { Button, Card, ErrorText, Field, H1, Note, Screen, Section, Sub, Toggle } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
+import { isWeb } from "@/lib/layout";
 import { setPins } from "@/lib/pins";
 import { usePrefs } from "@/lib/prefs";
 import { supabase } from "@/lib/supabase";
@@ -70,7 +71,9 @@ export default function Settings() {
 
       <Section title="SOS" />
       <Card>
-        <Toggle label="Shake to send SOS" hint="Three hard shakes while SAAHI is open." value={prefs.shakeToSos} onChange={(v) => setPrefs({ shakeToSos: v })} />
+        {!isWeb && (
+          <Toggle label="Shake to send SOS" hint="Three hard shakes while SAAHI is open." value={prefs.shakeToSos} onChange={(v) => setPrefs({ shakeToSos: v })} />
+        )}
         <Toggle label="Record audio during SOS" hint="Saved to your private vault when the alert ends." value={prefs.recordAudio} onChange={(v) => setPrefs({ recordAudio: v })} />
       </Card>
 

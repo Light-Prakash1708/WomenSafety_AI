@@ -51,6 +51,8 @@ type Ctx = {
   recording: boolean;
   sms: SmsState;
   online: boolean;
+  /** The SOS text as it would be sent, for web share buttons and copy. */
+  messageText: string;
   start: (trigger: Trigger) => Promise<void>;
   resendSms: () => Promise<void>;
   submitPin: (pin: string) => Promise<PinResult>;
@@ -434,8 +436,11 @@ export function SosProvider({ children }: { children: ReactNode }) {
     };
   }, [prefs.shakeToSos, phase, session, start]);
 
+  const messageText = useMemo(() => smsBody(alert, location), [smsBody, alert, location]);
+
   const value = useMemo(
     () => ({
+      messageText,
       phase,
       alert,
       recipients,
@@ -451,7 +456,7 @@ export function SosProvider({ children }: { children: ReactNode }) {
       sendSafeMessage,
       call112,
     }),
-    [phase, alert, recipients, location, backgroundSharing, recordingSecs, recording, sms, online, start, resendSms, submitPin, sendSafeMessage, call112],
+    [messageText, phase, alert, recipients, location, backgroundSharing, recordingSecs, recording, sms, online, start, resendSms, submitPin, sendSafeMessage, call112],
   );
 
   return <SosCtx.Provider value={value}>{children}</SosCtx.Provider>;

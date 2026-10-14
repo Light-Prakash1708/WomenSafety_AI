@@ -4,7 +4,7 @@
 
 Created by Prakash.
 
-SAAHI is an Android and iOS app for women's safety in India, built with Expo (React Native) and Supabase. Most safety apps cover the ten seconds after someone presses SOS. SAAHI also covers the weeks before (escalating harassment and stalking) and the days after (evidence and support).
+SAAHI is a women's safety app for India that runs on Android, iOS and the web (any computer or phone browser, installable like an app). It's built with Expo (React Native) and Supabase. Most safety apps cover the ten seconds after someone presses SOS. SAAHI also covers the weeks before (escalating harassment and stalking) and the days after (evidence and support).
 
 > SAAHI works alongside 112 India. It does not replace emergency services, cannot guarantee that anyone reaches a person in time, and must be tested on real phones before anyone relies on it.
 
@@ -48,6 +48,8 @@ src/
     onboarding.tsx, sign-in.tsx, contacts.tsx, settings.tsx, report-area.tsx
   components/           UI kit, SOS hold button, PIN pad, chart, icons
   lib/
+    layout.ts           Phone vs laptop layout (side rail from 900 px)
+    pwa.ts              Makes the web build installable
     sos.tsx             SOS engine (location, SMS, push, realtime, recording, duress)
     bg-location.ts      Background location task
     vault.ts            Fingerprinting, upload, case pack
@@ -57,12 +59,51 @@ supabase/
   migrations/           Database schema + row-level security + storage bucket
   functions/            alert-public, sos-dispatch, ai, journey-watchdog
   cron.sql              Schedules the watchdog every minute
+public/                 Web app shell: page template, install manifest, icons, offline cache
 web/
-  index.html            Landing page
-  track/                SOS tracking page for contacts (GitHub Pages ready)
+  track/                SOS tracking page for contacts (deployed with the web app)
 ```
 
 ---
+
+## Web app
+
+The same codebase runs in the browser with the same design. On phones it uses the bottom tab bar; on laptops and tablets (900 px and wider) navigation moves to a left rail with an always-available SOS button, and content sits in a centred column.
+
+**Run it on your computer**
+
+```bash
+npm install
+cp .env.example .env        # add your Supabase URL and anon key
+npm run web                 # development, opens http://localhost:8081
+```
+
+For a production build you can host anywhere:
+
+```bash
+npm run build:web           # writes the site to dist/
+npm run serve:web           # serves dist/ locally to check it
+```
+
+**Install it like an app.** Open the site in Chrome or Edge and choose *Install SAAHI* in the address bar (on a phone: *Add to Home Screen*). It opens in its own window with the SAAHI icon, and the app shell still opens on a weak connection.
+
+**Publish it from GitHub.** The *Deploy web app* workflow builds the app and the contact tracking page on every push to `main`:
+
+1. In the repo, go to **Settings → Pages** and set **Source: GitHub Actions**.
+2. In **Settings → Secrets and variables → Actions → Variables**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+3. Push (or run the workflow by hand). The app is at `https://<user>.github.io/<repo>/` and the tracking page at `https://<user>.github.io/<repo>/track/`.
+
+**What's different in a browser.** Browsers can't send texts, run in the background or read the motion sensor, so:
+
+| On a phone (app) | In a browser |
+| --- | --- |
+| SOS opens your Messages app with the alert prefilled | SOS shows a WhatsApp and a Text button for each person, plus *Copy alert message* |
+| Location keeps sharing with the screen locked | Keep the SAAHI tab open to keep sharing |
+| Shake 3 times to send SOS | Hold the SOS button with mouse, finger or space bar |
+| Push alerts for guardians | Guardians see alerts on Home when they open SAAHI |
+| PINs in the phone's secure storage | PINs stored as hashes in the browser's local storage |
+
+Quick exit also renames the browser tab to "Calculator".
 
 ## Setup
 
@@ -114,11 +155,9 @@ npx eas-cli@latest init        # creates the project and prints a projectId
 
 Put the projectId in `.env` as `EXPO_PUBLIC_EAS_PROJECT_ID`. For Android push, add FCM credentials with `npx eas-cli@latest credentials` (see Expo's push notification setup guide).
 
-### 4. The tracking page (GitHub Pages)
+### 4. The tracking page and web app (GitHub Pages)
 
-1. Edit `web/track/config.js` with the same Supabase URL and anon key. The anon key is designed to be public.
-2. Push the repo to GitHub, then go to **Settings → Pages → Source: GitHub Actions**. The included workflow publishes `web/` on every push to `main`.
-3. Your page is at `https://YOURNAME.github.io/REPO-NAME/track`. Put that in `.env` (`EXPO_PUBLIC_TRACK_PAGE_URL`) and in the `TRACK_PAGE_URL` secret.
+Both are published by the *Deploy web app* workflow; see **Web app → Publish it from GitHub** above. Then put `https://<user>.github.io/<repo>/track` in `.env` (`EXPO_PUBLIC_TRACK_PAGE_URL`) and in the `TRACK_PAGE_URL` Supabase secret, so SOS texts sent from the phone app link to it too.
 
 ### 5. Run it on a phone
 
@@ -143,17 +182,9 @@ npx eas-cli@latest submit
 
 ---
 
-## Push to GitHub
+## Repository
 
-```bash
-git add -A
-git commit -m "SAAHI v0.1"
-git branch -M main
-git remote add origin https://github.com/YOURNAME/saahi.git
-git push -u origin main
-```
-
-`.env` is git-ignored. Never commit your service-role key; the app only ever uses the anon key.
+Code: <https://github.com/Light-Prakash1708/WomenSafety_AI>. `.env` is git-ignored. Never commit your Supabase service-role key; the apps only ever use the anon key.
 
 ---
 
@@ -182,10 +213,10 @@ Privacy rules in the database:
 
 ## Tested
 
-v0.1 was tested end to end against a local Supabase-compatible stack (Postgres 16, Supabase Auth, PostgREST, the four edge functions) with the web build driven in Chromium at phone size:
+v0.1 was tested end to end against a local Supabase-compatible stack (Postgres 16, Supabase Auth, PostgREST, the four edge functions) with the web build driven in Chromium:
 
 - **63 backend checks passed**: email-code sign-in, row-level security between users, guardian auto-linking and access, the public tracking link (open, "On it", bad and unknown tokens), duress, real cancel hiding location, AI summary and guide fallbacks, the 3-reporter threshold for area reports, the Walk with me watchdog (no double alerts), and vault upload, access and signed links.
-- **42 in-app checks passed**: sign-in, onboarding validation, language switching, short tap not firing SOS, hold-to-SOS with GPS, the helper's tracking page, live "2 people are coming", wrong PIN, duress PIN, revealing the hidden alert, real cancel, pattern entries and summary, journeys and check-ins, vault fingerprints matching the saved text, SOS audio saved to the vault, area reports, the calculator disguise, ghost call, and deleting all data.
+- **The web app was tested at phone size (390 × 844, 50 checks) and laptop size (1440 × 900, 52 checks)**, all passing, including a check on every screen that nothing crosses the screen edge or scrolls sideways, the side rail and centred column on laptops, the install manifest and offline cache, the calculator renaming the browser tab, and deep links working when hosted on GitHub Pages. The flows covered: sign-in, onboarding validation, language switching, short tap not firing SOS, hold-to-SOS with GPS, the helper's tracking page, live "2 people are coming", wrong PIN, duress PIN, revealing the hidden alert, real cancel, pattern entries and summary, journeys and check-ins, vault fingerprints matching the saved text, SOS audio saved to the vault, area reports, the calculator disguise, ghost call, and deleting all data.
 
 Not covered by those runs, so test on real phones: SMS sending, push delivery, background location with the screen locked, shake to SOS, and realtime updates (the app also polls every 8 seconds as a fallback).
 

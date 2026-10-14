@@ -36,7 +36,12 @@
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png",
-      "output": "single"
+      "output": "single",
+      "name": "SAAHI",
+      "shortName": "SAAHI",
+      "themeColor": "#FBF8FF",
+      "backgroundColor": "#FBF8FF",
+      "description": "A safety network that remembers the pattern, signals quietly and shows you help is coming."
     },
     "plugins": [
       "expo-router",

@@ -39,6 +39,20 @@ export default function Calculator() {
     return () => sub.remove();
   }, []);
 
+  // In a browser, the tab title would give the disguise away.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const prev = document.title;
+    const id = setInterval(() => {
+      if (document.title !== "Calculator") document.title = "Calculator";
+    }, 300);
+    document.title = "Calculator";
+    return () => {
+      clearInterval(id);
+      document.title = prev;
+    };
+  }, []);
+
   const press = (k: string) => {
     if (/^\d$/.test(k)) {
       setCur((c) => (c === "0" || fresh ? k : c.length < 12 ? c + k : c));
@@ -72,10 +86,12 @@ export default function Calculator() {
     <SafeAreaView style={st.root}>
       <StatusBar style="light" />
       <View style={{ flex: 1 }} />
-      <Text style={st.disp} numberOfLines={1} adjustsFontSizeToFit>
-        {cur}
-      </Text>
-      <View style={st.grid}>
+      <View style={{ width: key * 4 + GAP * 3, alignSelf: "center" }}>
+        <Text style={st.disp} numberOfLines={1} adjustsFontSizeToFit>
+          {cur}
+        </Text>
+      </View>
+      <View style={[st.grid, { width: key * 4 + GAP * 3 }]}>
         {KEYS.map(({ k, kind, wide }) => (
           <Pressable
             key={k}
@@ -103,7 +119,7 @@ export default function Calculator() {
 const st = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000", paddingHorizontal: 16, paddingBottom: 24 },
   disp: { color: "#fff", fontSize: 80, fontWeight: "300", textAlign: "right", paddingHorizontal: 12, marginBottom: 12, fontVariant: ["tabular-nums"] },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignSelf: "center", maxWidth: 480 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignSelf: "center" },
   key: { borderRadius: 999, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
   keyTxt: { color: "#fff", fontSize: 32 },
 });

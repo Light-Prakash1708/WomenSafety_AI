@@ -7,6 +7,7 @@ import { Button, Card, Chip, ErrorText, Field, H1, Note, Screen, Sub } from "@/c
 import { useApp } from "@/lib/app-state";
 import type { Lang } from "@/lib/i18n";
 import { registerPush } from "@/lib/notifications";
+import { isWeb } from "@/lib/layout";
 import { setPins } from "@/lib/pins";
 import { c, f } from "@/lib/theme";
 
@@ -124,14 +125,22 @@ export default function Onboarding() {
           <H1>Let SAAHI help when it counts</H1>
           <Sub>Each one is used only during an SOS or a journey you start.</Sub>
           <Button tone={perms.location ? "ok" : "ghost"} label={perms.location ? "Location: allowed" : "Allow location"} onPress={askLocation} />
-          <Button
-            tone={perms.background ? "ok" : "ghost"}
-            label={perms.background ? "Background location: allowed" : "Allow location while screen is locked"}
-            onPress={askBackground}
-            disabled={!perms.location}
-          />
-          <Sub style={{ fontSize: 12.5 }}>On Android, choose "Allow all the time" on the next screen. Without it, sharing pauses when your phone locks.</Sub>
-          <Button tone={perms.notify ? "ok" : "ghost"} label={perms.notify ? "Notifications: on" : "Turn on notifications"} onPress={askNotify} />
+          {isWeb ? (
+            <Note>
+              On a computer or in a browser, keep SAAHI open in a tab during an SOS or a journey so your location keeps updating. Install the SAAHI phone app for sharing with the screen locked.
+            </Note>
+          ) : (
+            <>
+              <Button
+                tone={perms.background ? "ok" : "ghost"}
+                label={perms.background ? "Background location: allowed" : "Allow location while screen is locked"}
+                onPress={askBackground}
+                disabled={!perms.location}
+              />
+              <Sub style={{ fontSize: 12.5 }}>On Android, choose "Allow all the time" on the next screen. Without it, sharing pauses when your phone locks.</Sub>
+              <Button tone={perms.notify ? "ok" : "ghost"} label={perms.notify ? "Notifications: on" : "Turn on notifications"} onPress={askNotify} />
+            </>
+          )}
           <Note>SAAHI works alongside 112 India. It doesn't replace emergency services, and it can't guarantee anyone will reach you in time.</Note>
         </View>
       )}

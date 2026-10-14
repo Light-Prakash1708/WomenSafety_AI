@@ -20,10 +20,12 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppStateProvider, useApp } from "@/lib/app-state";
+import { setupPwa } from "@/lib/pwa";
 import { SosProvider } from "@/lib/sos";
 import { c } from "@/lib/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+setupPwa();
 
 function Shell() {
   const { ready } = useApp();

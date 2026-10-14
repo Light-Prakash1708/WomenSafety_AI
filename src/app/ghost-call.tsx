@@ -94,6 +94,6 @@ const st = StyleSheet.create({
   av: { width: 100, height: 100, borderRadius: 50, backgroundColor: "#FFC24B", alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "#fff" },
   name: { color: "#fff", fontSize: 34, fontWeight: "500", marginTop: 18 },
   small: { color: "#C9C4DC", fontSize: 16, marginTop: 4, textAlign: "center", paddingHorizontal: 30 },
-  acts: { flexDirection: "row", justifyContent: "space-evenly" },
+  acts: { flexDirection: "row", justifyContent: "space-evenly", width: "100%", maxWidth: 420, alignSelf: "center" },
   btn: { width: 76, height: 76, borderRadius: 38, alignItems: "center", justifyContent: "center" },
 });

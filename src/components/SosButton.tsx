@@ -4,16 +4,17 @@ import { Animated, Easing, Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { c, f } from "@/lib/theme";
 
-const SIZE = 210;
-const STROKE = 12;
-const R = (SIZE - STROKE) / 2;
-const CIRC = 2 * Math.PI * R;
 const HOLD_MS = 2000;
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /** Press and hold for two seconds. Releasing early cancels, so a pocket tap can't fire it. */
-export function SosButton({ onFire, sublabel }: { onFire: () => void; sublabel: string }) {
+export function SosButton({ onFire, sublabel, size = 210 }: { onFire: () => void; sublabel: string; size?: number }) {
+  const SIZE = size;
+  const STROKE = Math.round(size * 0.057);
+  const R = (SIZE - STROKE) / 2;
+  const CIRC = 2 * Math.PI * R;
+  const big = size >= 180;
   const [progress] = useState(() => new Animated.Value(0));
   const anim = useRef<Animated.CompositeAnimation | null>(null);
   const [scale] = useState(() => new Animated.Value(1));
@@ -85,11 +86,11 @@ export function SosButton({ onFire, sublabel }: { onFire: () => void; sublabel: 
             borderColor: c.ink,
             alignItems: "center",
             justifyContent: "center",
-            borderBottomWidth: 7,
+            borderBottomWidth: big ? 7 : 5,
           }}
         >
-          <Text style={{ fontFamily: f.display, fontSize: 44, color: c.white, letterSpacing: 1 }}>SOS</Text>
-          <Text style={{ fontFamily: f.bodySemi, fontSize: 12.5, color: c.white, opacity: 0.92 }}>{sublabel}</Text>
+          <Text style={{ fontFamily: f.display, fontSize: Math.round(size * 0.21), color: c.white, letterSpacing: 1 }}>SOS</Text>
+          <Text style={{ fontFamily: f.bodySemi, fontSize: big ? 12.5 : 11, color: c.white, opacity: 0.92 }}>{sublabel}</Text>
         </View>
       </Animated.View>
     </Pressable>

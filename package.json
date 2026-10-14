@@ -55,7 +55,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "build:android": "npx eas-cli@latest build -p android --profile preview",
-    "build:ios": "npx eas-cli@latest build -p ios --profile preview"
+    "build:ios": "npx eas-cli@latest build -p ios --profile preview",
+    "build:web": "expo export --platform web --output-dir dist",
+    "serve:web": "expo serve"
   },
   "private": true
 }
