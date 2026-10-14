@@ -39,13 +39,19 @@ export type PushMessage = { to: string; title: string; body: string; data?: Reco
 export async function sendPush(messages: PushMessage[]): Promise<number> {
   const valid = messages.filter((m) => m.to?.startsWith("ExponentPushToken") || m.to?.startsWith("ExpoPushToken"));
   if (!valid.length) return 0;
-  const res = await fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(
-      valid.map((m) => ({ ...m, sound: "default", priority: "high", channelId: "sos" })),
-    ),
-  });
+  let res: Response;
+  try {
+    res = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(
+        valid.map((m) => ({ ...m, sound: "default", priority: "high", channelId: "sos" })),
+      ),
+    });
+  } catch {
+    // Expo's push service unreachable: the SMS from her phone still goes out.
+    return 0;
+  }
   if (!res.ok) return 0;
   const out = await res.json().catch(() => ({ data: [] }));
   return (out.data ?? []).filter((t: { status: string }) => t.status === "ok").length;

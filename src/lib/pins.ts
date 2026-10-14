@@ -1,7 +1,17 @@
 // Cancel PIN and duress PIN, stored only on this phone as salted SHA-256 hashes.
 // Entering the duress PIN makes the screen say "cancelled" while the alert stays live.
 import * as Crypto from "expo-crypto";
-import * as SecureStore from "expo-secure-store";
+import * as SecureStoreNative from "expo-secure-store";
+import { Platform } from "react-native";
+
+// SecureStore has no web implementation; the web preview falls back to localStorage.
+const SecureStore =
+  Platform.OS === "web"
+    ? {
+        getItemAsync: async (k: string) => globalThis.localStorage?.getItem(k) ?? null,
+        setItemAsync: async (k: string, v: string) => globalThis.localStorage?.setItem(k, v),
+      }
+    : SecureStoreNative;
 
 const SALT = "saahi.pin.salt";
 const CANCEL = "saahi.pin.cancel";

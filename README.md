@@ -2,6 +2,8 @@
 
 **A safety network that remembers the pattern, signals quietly and shows you help is coming.**
 
+Created by Prakash.
+
 SAAHI is an Android and iOS app for women's safety in India, built with Expo (React Native) and Supabase. Most safety apps cover the ten seconds after someone presses SOS. SAAHI also covers the weeks before (escalating harassment and stalking) and the days after (evidence and support).
 
 > SAAHI works alongside 112 India. It does not replace emergency services, cannot guarantee that anyone reaches a person in time, and must be tested on real phones before anyone relies on it.
@@ -178,6 +180,15 @@ Privacy rules in the database:
 
 ---
 
+## Tested
+
+v0.1 was tested end to end against a local Supabase-compatible stack (Postgres 16, Supabase Auth, PostgREST, the four edge functions) with the web build driven in Chromium at phone size:
+
+- **63 backend checks passed**: email-code sign-in, row-level security between users, guardian auto-linking and access, the public tracking link (open, "On it", bad and unknown tokens), duress, real cancel hiding location, AI summary and guide fallbacks, the 3-reporter threshold for area reports, the Walk with me watchdog (no double alerts), and vault upload, access and signed links.
+- **42 in-app checks passed**: sign-in, onboarding validation, language switching, short tap not firing SOS, hold-to-SOS with GPS, the helper's tracking page, live "2 people are coming", wrong PIN, duress PIN, revealing the hidden alert, real cancel, pattern entries and summary, journeys and check-ins, vault fingerprints matching the saved text, SOS audio saved to the vault, area reports, the calculator disguise, ghost call, and deleting all data.
+
+Not covered by those runs, so test on real phones: SMS sending, push delivery, background location with the screen locked, shake to SOS, and realtime updates (the app also polls every 8 seconds as a fallback).
+
 ## Known limits in v0.1
 
 Be upfront about these with testers:
@@ -209,4 +220,4 @@ CI runs all three on every push.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Created by Prakash.

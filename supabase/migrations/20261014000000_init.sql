@@ -305,8 +305,15 @@ $$;
 create policy "guardian sees active alerts" on public.alerts
   for select using (status = 'active' and public.is_guardian_of(owner_id));
 
+-- Writes must also point at her own alert, so nobody can inject points into someone else's trail.
+create or replace function public.owns_alert(a uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (select 1 from public.alerts where id = a and owner_id = auth.uid())
+$$;
+
 create policy "own alert locations" on public.alert_locations
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (owner_id = auth.uid() and public.owns_alert(alert_id));
 
 create policy "guardian sees alert locations" on public.alert_locations
   for select using (
@@ -315,7 +322,8 @@ create policy "guardian sees alert locations" on public.alert_locations
   );
 
 create policy "own alert recipients" on public.alert_recipients
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (owner_id = auth.uid() and public.owns_alert(alert_id));
 
 create policy "guardian sees recipients" on public.alert_recipients
   for select using (
@@ -342,19 +350,31 @@ revoke all on function public.guardian_acknowledge(uuid, text) from public, anon
 grant execute on function public.guardian_acknowledge(uuid, text) to authenticated;
 
 create policy "own journeys" on public.journeys
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (owner_id = auth.uid() and (alert_id is null or public.owns_alert(alert_id)));
 create policy "own threads" on public.pattern_threads
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create or replace function public.owns_thread(t uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (select 1 from public.pattern_threads where id = t and owner_id = auth.uid())
+$$;
+create or replace function public.owns_vault_item(v uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select v is null or exists (select 1 from public.vault_items where id = v and owner_id = auth.uid())
+$$;
+
 create policy "own entries" on public.pattern_entries
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (owner_id = auth.uid() and public.owns_thread(thread_id) and public.owns_vault_item(vault_item_id));
 create policy "own summaries" on public.pattern_summaries
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (owner_id = auth.uid() and public.owns_thread(thread_id));
 create policy "own vault" on public.vault_items
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create policy "own vault log read" on public.vault_access_log
   for select using (owner_id = auth.uid());
 create policy "own vault log write" on public.vault_access_log
-  for insert with check (owner_id = auth.uid());
+  for insert with check (owner_id = auth.uid() and public.owns_vault_item(vault_item_id));
 create policy "own community reports" on public.community_reports
   for all using (reporter_id = auth.uid()) with check (reporter_id = auth.uid());
 

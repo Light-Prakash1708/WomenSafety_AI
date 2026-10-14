@@ -343,6 +343,25 @@ export function SosProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [isLocal, phase, createServerAlert, subscribe, uid]);
 
+  // Poll as well as listen: realtime can drop on weak networks, and a missed "On it"
+  // is exactly the update she needs to see.
+  const serverAlertId = alert && !alert.local ? alert.id : null;
+  useEffect(() => {
+    if (!serverAlertId || phase === "idle") return;
+    let lastAcked = -1;
+    const poll = async () => {
+      const { data } = await supabase.from("alert_recipients").select("*").eq("alert_id", serverAlertId);
+      if (!data) return;
+      const rows = data as Recipient[];
+      const acked = rows.filter((r) => r.status === "acknowledged").length;
+      if (lastAcked >= 0 && acked > lastAcked) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      lastAcked = acked;
+      setRecipients(rows);
+    };
+    const id = setInterval(poll, 8000);
+    return () => clearInterval(id);
+  }, [serverAlertId, phase]);
+
   // ---------------- end ----------------
   const submitPin = useCallback(
     async (pin: string): Promise<PinResult> => {
@@ -386,23 +405,33 @@ export function SosProvider({ children }: { children: ReactNode }) {
 
   // ---------------- shake to SOS ----------------
   useEffect(() => {
-    if (!prefs.shakeToSos || phase !== "idle" || !session) return;
+    if (!prefs.shakeToSos || phase !== "idle" || !session || Platform.OS === "web") return;
     let hits: number[] = [];
-    Accelerometer.setUpdateInterval(100);
-    const sub = Accelerometer.addListener(({ x, y, z }) => {
-      const g = Math.sqrt(x * x + y * y + z * z);
-      if (g > 2.6) {
-        const now = Date.now();
-        hits = [...hits.filter((h) => now - h < 1500), now];
-        // Debounce hits that belong to the same jolt.
-        const distinct = hits.filter((h, i) => i === 0 || h - hits[i - 1] > 200);
-        if (distinct.length >= 3) {
-          hits = [];
-          start("shake");
-        }
-      }
-    });
-    return () => sub.remove();
+    let sub: { remove: () => void } | null = null;
+    let cancelled = false;
+    Accelerometer.isAvailableAsync()
+      .then((ok) => {
+        if (!ok || cancelled) return;
+        Accelerometer.setUpdateInterval(100);
+        sub = Accelerometer.addListener(({ x, y, z }) => {
+          const g = Math.sqrt(x * x + y * y + z * z);
+          if (g > 2.6) {
+            const now = Date.now();
+            hits = [...hits.filter((h) => now - h < 1500), now];
+            // Debounce hits that belong to the same jolt.
+            const distinct = hits.filter((h, i) => i === 0 || h - hits[i - 1] > 200);
+            if (distinct.length >= 3) {
+              hits = [];
+              start("shake");
+            }
+          }
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
   }, [prefs.shakeToSos, phase, session, start]);
 
   const value = useMemo(

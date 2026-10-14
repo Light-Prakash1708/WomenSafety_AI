@@ -67,11 +67,12 @@ export default function GhostCall() {
       </View>
       <View style={{ flex: 1 }} />
       <View style={st.acts}>
-        <Pressable accessibilityLabel="Decline" onPress={() => router.back()} style={[st.btn, { backgroundColor: "#FF3B30", transform: [{ rotate: "135deg" }] }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Decline" onPress={() => router.back()} style={[st.btn, { backgroundColor: "#FF3B30", transform: [{ rotate: "135deg" }] }]}>
           <IconPhone size={30} color="#fff" />
         </Pressable>
         {phase === "ringing" && (
           <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Accept"
             onPress={() => {
               Vibration.cancel();

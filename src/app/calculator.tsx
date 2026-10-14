@@ -3,7 +3,7 @@
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type Op = "+" | "−" | "×" | "÷";
@@ -30,6 +30,9 @@ export default function Calculator() {
   const [acc, setAcc] = useState<number | null>(null);
   const [op, setOp] = useState<Op | null>(null);
   const [fresh, setFresh] = useState(false);
+  const { width } = useWindowDimensions();
+  const GAP = 14;
+  const key = Math.floor((Math.min(width, 480) - 32 - GAP * 3) / 4);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
@@ -77,11 +80,11 @@ export default function Calculator() {
           <Pressable
             key={k}
             onPress={() => press(k)}
-            onLongPress={k === "AC" ? () => router.replace("/(tabs)") : undefined}
+            onLongPress={k === "AC" ? () => router.dismissTo("/(tabs)") : undefined}
             delayLongPress={900}
             style={({ pressed }) => [
               st.key,
-              wide && st.wide,
+              { width: wide ? key * 2 + GAP : key, height: key },
               kind === "fn" && { backgroundColor: "#A5A5A5" },
               kind === "op" && { backgroundColor: op === k && fresh ? "#FFFFFF" : "#FF9F0A" },
               pressed && { opacity: 0.7 },
@@ -100,8 +103,7 @@ export default function Calculator() {
 const st = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000", paddingHorizontal: 16, paddingBottom: 24 },
   disp: { color: "#fff", fontSize: 80, fontWeight: "300", textAlign: "right", paddingHorizontal: 12, marginBottom: 12, fontVariant: ["tabular-nums"] },
-  grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 14 },
-  key: { width: "22.5%", aspectRatio: 1, borderRadius: 999, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
-  wide: { width: "48%", aspectRatio: undefined, height: undefined },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 14, alignSelf: "center", maxWidth: 480 },
+  key: { borderRadius: 999, backgroundColor: "#333", alignItems: "center", justifyContent: "center" },
   keyTxt: { color: "#fff", fontSize: 32 },
 });

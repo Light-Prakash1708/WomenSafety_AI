@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     const ai = list.length ? await claude(SUMMARY_SYSTEM, `Entries (time | kind | channel | handle | note):\n${prompt}`) : null;
     const text = ai ?? rulesSummary(list);
     const source = ai ? "ai" : "rules";
-    await db.from("pattern_summaries").insert({ owner_id: uid, thread_id: body.thread_id, body: text, source });
+    if (list.length) await db.from("pattern_summaries").insert({ owner_id: uid, thread_id: body.thread_id, body: text, source });
     return json({ body: text, source });
   }
 

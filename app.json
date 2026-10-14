@@ -12,7 +12,11 @@
       "supportsTablet": false,
       "bundleIdentifier": "in.saahi.app",
       "infoPlist": {
-        "UIBackgroundModes": ["location", "audio", "remote-notification"]
+        "UIBackgroundModes": [
+          "location",
+          "audio",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -23,12 +27,16 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["VIBRATE", "RECEIVE_BOOT_COMPLETED"],
+      "permissions": [
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "bundler": "metro",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single"
     },
     "plugins": [
       "expo-router",

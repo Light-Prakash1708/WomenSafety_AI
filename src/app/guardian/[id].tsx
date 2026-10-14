@@ -53,7 +53,7 @@ export default function GuardianAlert() {
         <View style={{ height: 24 }} />
         <H1>This alert has ended</H1>
         <Sub>She cancelled it, or it's no longer shared with you.</Sub>
-        <Button label="Back" onPress={() => router.replace("/(tabs)")} />
+        <Button label="Back" onPress={() => router.dismissTo("/(tabs)")} />
       </Screen>
     );
   }

@@ -43,7 +43,7 @@ export default function SosScreen() {
             <Text style={[st.btnTxt, { color: "#06210F" }]}>Tell my circle I'm safe</Text>
           </Pressable>
         )}
-        <Pressable style={[st.btn, { marginTop: 10 }]} onPress={() => router.replace("/(tabs)")}>
+        <Pressable style={[st.btn, { marginTop: 10 }]} onPress={() => router.dismissTo("/(tabs)")}>
           <Text style={st.btnTxt}>Done</Text>
         </Pressable>
       </SafeAreaView>
@@ -54,7 +54,7 @@ export default function SosScreen() {
     return (
       <SafeAreaView style={[st.root, { justifyContent: "center", padding: 24 }]}>
         <Text style={st.title}>No active alert</Text>
-        <Pressable style={[st.btn, { marginTop: 20 }]} onPress={() => router.replace("/(tabs)")}>
+        <Pressable style={[st.btn, { marginTop: 20 }]} onPress={() => router.dismissTo("/(tabs)")}>
           <Text style={st.btnTxt}>Back</Text>
         </Pressable>
       </SafeAreaView>
@@ -155,7 +155,7 @@ export default function SosScreen() {
             <Text style={[st.btnTxt, { color: "#06210F" }]}>{t("imSafe")}</Text>
           </Pressable>
         </View>
-        <Pressable onPress={() => router.replace("/(tabs)")} style={{ alignItems: "center", marginTop: 16 }}>
+        <Pressable onPress={() => router.dismissTo("/(tabs)")} style={{ alignItems: "center", marginTop: 16 }}>
           <Text style={{ fontFamily: f.bodySemi, color: c.nightMuted, fontSize: 13 }}>Hide this screen (alert keeps running)</Text>
         </Pressable>
       </ScrollView>

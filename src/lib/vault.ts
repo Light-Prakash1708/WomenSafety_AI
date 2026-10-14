@@ -2,6 +2,7 @@
 // so the record shows the file hasn't changed since it was saved.
 import * as Crypto from "expo-crypto";
 import { File, Directory, Paths } from "expo-file-system";
+import { Platform } from "react-native";
 import { supabase, type VaultItem } from "./supabase";
 
 const toHex = (buf: ArrayBuffer) =>
@@ -33,16 +34,19 @@ export async function addToVault(opts: {
   const uid = u.user?.id;
   if (!uid) throw new Error("Sign in to use your vault.");
 
-  const src = new File(opts.uri);
-  const bytes = await src.bytes();
+  const web = Platform.OS === "web";
+  const src = web ? null : new File(opts.uri);
+  const bytes = web ? new Uint8Array(await (await fetch(opts.uri)).arrayBuffer()) : await src!.bytes();
   const sha = await sha256OfBytes(bytes);
   const name = `${Date.now()}-${sha.slice(0, 12)}.${extFor(opts.mime)}`;
 
   // Keep an original on the phone, so it survives a bad connection.
-  try {
-    src.copy(new File(localDir(), name));
-  } catch {
-    // A copy failure shouldn't block the upload.
+  if (src) {
+    try {
+      src.copy(new File(localDir(), name));
+    } catch {
+      // A copy failure shouldn't block the upload.
+    }
   }
 
   const path = `${uid}/${name}`;
@@ -70,6 +74,10 @@ export async function addToVault(opts: {
 }
 
 export async function addNoteToVault(label: string, text: string): Promise<VaultItem> {
+  if (Platform.OS === "web") {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    return addToVault({ uri: url, kind: "note", mime: "text/plain", label, capturedAt: new Date() });
+  }
   const f = new File(localDir(), `${Date.now()}-note.txt`);
   f.create();
   f.write(text);
