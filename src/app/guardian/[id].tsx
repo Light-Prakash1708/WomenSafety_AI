@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import { Button, Card, ErrorText, Field, H1, Note, Screen, Sub } from "@/components/ui";
 import { mapsLink } from "@/lib/geo";
-import { supabase, type Recipient } from "@/lib/supabase";
+import { api, type Recipient } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
 type A = { id: string; status: string; duress: boolean; last_lat: number | null; last_lng: number | null; last_accuracy: number | null; last_seen_at: string | null; started_at: string; battery: number | null };
@@ -20,14 +20,11 @@ export default function GuardianAlert() {
   const [seen, setSeen] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    const [a, r] = await Promise.all([
-      supabase.from("alerts").select("*").eq("id", id).maybeSingle(),
-      supabase.from("alert_recipients").select("*").eq("alert_id", id),
-    ]);
-    const row = (a.data as A) ?? null;
+    const r = await api<{ alert: A; recipients: Recipient[] }>("GET", `alerts/${id}`).catch(() => null);
+    const row = r?.alert ?? null;
     setAlert(row);
     setSeen(row?.last_seen_at ? Math.round((Date.now() - +new Date(row.last_seen_at)) / 60000) : null);
-    setRecips((r.data as Recipient[]) ?? []);
+    setRecips(r?.recipients ?? []);
   }, [id]);
 
   useEffect(() => {
@@ -41,8 +38,11 @@ export default function GuardianAlert() {
 
   const ack = async () => {
     setErr("");
-    const { error } = await supabase.rpc("guardian_acknowledge", { p_alert: id, p_message: msg.trim() || null });
-    if (error) return setErr("Couldn't send. Call her or 112 directly.");
+    try {
+      await api("POST", `alerts/${id}/ack`, { message: msg.trim() || null });
+    } catch {
+      return setErr("Couldn't send. Call her or 112 directly.");
+    }
     setSent(true);
     load();
   };

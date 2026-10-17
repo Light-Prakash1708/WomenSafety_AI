@@ -42,4 +42,5 @@ yarn-error.*
 
 /android
 .env
-supabase/.temp/
+saahi-local.db*
+.vercel

@@ -96,7 +96,7 @@ export default function Onboarding() {
       {step === 1 && (
         <View style={{ gap: 14 }}>
           <H1>Who should come for you?</H1>
-          <Sub>Pick 2 to 5 people who'll pick up at night. They get a text with your live location. Anyone with SAAHI also gets a push.</Sub>
+          <Sub>Pick 2 to 5 people who'll pick up at night. They get a text with your live location. Tap More on a contact to send their guardian code, so they get alerts in the app too.</Sub>
           <ContactEditor />
         </View>
       )}
@@ -145,7 +145,7 @@ export default function Onboarding() {
         </View>
       )}
 
-      <ErrorText>{err}</ErrorText>
+      <ErrorText>{step === 1 && contacts.length > 0 && err.startsWith("Add at least one") ? "" : err}</ErrorText>
       <View style={{ gap: 10, marginTop: 20 }}>
         <Button label={step === 3 ? "Finish setup" : "Continue"} onPress={next} loading={busy} />
         {step > 0 && <Button tone="ghost" label="Back" onPress={() => setStep(step - 1)} />}

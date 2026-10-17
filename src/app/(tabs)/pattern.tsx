@@ -6,7 +6,7 @@ import { PatternChart } from "@/components/PatternChart";
 import { Button, Card, Chip, ErrorText, Field, H1, Note, Screen, Section, Sub, TopBar, s as ui } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
 import { KIND, stats } from "@/lib/pattern";
-import { supabase, type PatternEntry } from "@/lib/supabase";
+import { api, type PatternEntry } from "@/lib/api";
 import { c, f, radius } from "@/lib/theme";
 
 type Thread = { id: string; title: string };
@@ -24,8 +24,7 @@ export default function Pattern() {
   const [newTitle, setNewTitle] = useState("");
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("pattern_threads").select("id, title").order("created_at", { ascending: false });
-    const list = (data ?? []) as Thread[];
+    const list = (await api<{ threads: Thread[] }>("GET", "threads")).threads;
     setThreads(list);
     const id = active && list.some((t) => t.id === active) ? active : list[0]?.id ?? null;
     setActive(id);
@@ -34,12 +33,9 @@ export default function Pattern() {
       setSummary(null);
       return;
     }
-    const [e, s] = await Promise.all([
-      supabase.from("pattern_entries").select("*").eq("thread_id", id).order("occurred_at", { ascending: false }),
-      supabase.from("pattern_summaries").select("id, body, source").eq("thread_id", id).order("created_at", { ascending: false }).limit(1),
-    ]);
-    setEntries((e.data ?? []) as PatternEntry[]);
-    setSummary(s.data?.[0] ?? null);
+    const r = await api<{ entries: PatternEntry[]; summary: { id: string; body: string; source: string } | null }>("GET", `threads/${id}`);
+    setEntries(r.entries);
+    setSummary(r.summary);
   }, [active]);
 
   useFocusEffect(
@@ -50,27 +46,37 @@ export default function Pattern() {
 
   const createThread = async () => {
     if (!newTitle.trim() || !session) return;
-    const { data } = await supabase.from("pattern_threads").insert({ owner_id: session.user.id, title: newTitle.trim() }).select("id").single();
-    setNewTitle("");
-    if (data) setActive(data.id);
-    load();
+    try {
+      const r = await api<{ thread: Thread }>("POST", "threads", { title: newTitle.trim() });
+      setNewTitle("");
+      setActive(r.thread.id);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   const summarize = async () => {
     if (!active) return;
     setErr("");
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("ai", { body: { mode: "summary", thread_id: active } });
-    setBusy(false);
-    if (error) return setErr("Couldn't draft a summary right now. Your entries are safe; try again in a minute.");
-    setSummary({ body: data.body, source: data.source });
-    load();
+    try {
+      const data = await api<{ body: string; source: string }>("POST", `threads/${active}/summary`, undefined, { timeoutMs: 40000 });
+      setSummary({ body: data.body, source: data.source });
+    } catch {
+      setErr("Couldn't draft a summary right now. Your entries are safe; try again in a minute.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveEdit = async () => {
     if (!summary || !active || !session) return;
-    await supabase.from("pattern_summaries").insert({ owner_id: session.user.id, thread_id: active, body: summary.body, source: summary.source, edited: true });
-    setEditing(false);
+    try {
+      await api("PUT", `threads/${active}/summary`, { body: summary.body, source: summary.source });
+      setEditing(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   const exportThread = async () => {

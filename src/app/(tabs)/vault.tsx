@@ -3,11 +3,11 @@ import { File, Paths } from "expo-file-system";
 import { useFocusEffect } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { useCallback, useState, type ComponentType } from "react";
-import { Linking, Pressable, Share, Text, View } from "react-native";
+import { Pressable, Share, Text, View } from "react-native";
 import { IconCamera, IconDoc, IconMic, IconSpark } from "@/components/icons";
 import { Button, Card, ErrorText, Field, H1, Note, Screen, Section, Sub, TopBar, s as ui } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
-import { supabase, type VaultItem } from "@/lib/supabase";
+import { api, type VaultItem } from "@/lib/api";
 import { c, f, radius } from "@/lib/theme";
 import { addNoteToVault, addToVault, deleteVaultItem, manifest, openVaultItem } from "@/lib/vault";
 
@@ -30,8 +30,8 @@ export default function Vault() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from("vault_items").select("*").order("captured_at", { ascending: false });
-    setItems((data ?? []) as VaultItem[]);
+    const r = await api<{ items: VaultItem[] }>("GET", "vault");
+    setItems(r.items);
   }, []);
 
   useFocusEffect(
@@ -47,7 +47,7 @@ export default function Vault() {
       const p = await ImagePicker.requestCameraPermissionsAsync();
       if (!p.granted) return setErr("Camera access is off. Turn it on in Settings to take photos here.");
     }
-    const r = await fn({ mediaTypes: ["images"], quality: 1, exif: true });
+    const r = await fn({ mediaTypes: ["images"], quality: from === "camera" ? 0.8 : 1, exif: true });
     if (r.canceled) return;
     setBusy(from);
     try {
@@ -88,16 +88,22 @@ export default function Vault() {
       } else {
         await Share.share({ message: text });
       }
-      const uid = (await supabase.auth.getUser()).data.user?.id;
-      if (uid) await supabase.from("vault_access_log").insert(items.map((it) => ({ owner_id: uid, vault_item_id: it.id, action: "export" })));
+      await api("POST", "vault/log", { ids: items.map((it) => it.id) }).catch(() => {});
     } catch {
       await Share.share({ message: text });
     }
   };
 
   const open = async (it: VaultItem) => {
-    const url = await openVaultItem(it);
-    if (url) Linking.openURL(url);
+    setErr("");
+    setBusy(`open-${it.id}`);
+    try {
+      await openVaultItem(it);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -146,7 +152,7 @@ export default function Vault() {
                   </Text>
                 </View>
                 <Text style={{ fontFamily: f.bodyBold, fontSize: 10, color: c.ink, borderWidth: 1.5, borderColor: c.ink, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1 }}>
-                  {it.source === "sos_recording" ? "SOS" : "Original"}
+                  {busy === `open-${it.id}` ? "Opening…" : it.source === "sos_recording" ? "SOS" : "Original"}
                 </Text>
               </Pressable>
               {confirmDelete === it.id && (

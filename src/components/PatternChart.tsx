@@ -1,7 +1,7 @@
 import { View } from "react-native";
 import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
 import { byDay, KIND } from "@/lib/pattern";
-import type { PatternEntry } from "@/lib/supabase";
+import type { PatternEntry } from "@/lib/api";
 import { c } from "@/lib/theme";
 
 const W = 320;

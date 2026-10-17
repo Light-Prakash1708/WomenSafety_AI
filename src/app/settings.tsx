@@ -6,11 +6,11 @@ import { useApp } from "@/lib/app-state";
 import { isWeb } from "@/lib/layout";
 import { setPins } from "@/lib/pins";
 import { usePrefs } from "@/lib/prefs";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 
 export default function Settings() {
   const router = useRouter();
-  const { profile, updateProfile } = useApp();
+  const { profile, updateProfile, signOut, session } = useApp();
   const [prefs, setPrefs] = usePrefs();
   const [name, setName] = useState(profile?.display_name ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
@@ -43,17 +43,14 @@ export default function Settings() {
   };
 
   const deleteEverything = async () => {
-    const uid = profile?.id;
-    if (!uid) return;
-    const { data: files } = await supabase.storage.from("vault").list(uid, { limit: 1000 });
-    if (files?.length) await supabase.storage.from("vault").remove(files.map((f) => `${uid}/${f.name}`));
-    await Promise.all(
-      ["community_reports", "vault_items", "pattern_threads", "journeys", "alerts", "trusted_contacts"].map((t) =>
-        supabase.from(t).delete().eq(t === "community_reports" ? "reporter_id" : "owner_id", uid),
-      ),
-    );
-    await supabase.auth.signOut();
-    router.replace("/");
+    setErr("");
+    try {
+      await api("DELETE", "me");
+      await signOut();
+      router.replace("/");
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   return (
@@ -88,9 +85,10 @@ export default function Settings() {
       </View>
       <ErrorText>{err}</ErrorText>
 
-      <Section title="Account" />
+      <Section title="Account" hint={session?.user.email} />
       <View style={{ gap: 10 }}>
-        <Button tone="ghost" label="Sign out" onPress={async () => { await supabase.auth.signOut(); router.replace("/"); }} />
+        <Button tone="ghost" label="Enter a guardian code" onPress={() => router.push("/join")} />
+        <Button tone="ghost" label="Sign out" onPress={async () => { await signOut(); router.replace("/"); }} />
         {!confirmDelete ? (
           <Button tone="ghost" label="Delete all my data" onPress={() => setConfirmDelete(true)} />
         ) : (

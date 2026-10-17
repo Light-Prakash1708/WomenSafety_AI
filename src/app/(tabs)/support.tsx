@@ -3,7 +3,7 @@ import { Linking, Pressable, Text, View } from "react-native";
 import { IconSpark } from "@/components/icons";
 import { Button, Card, Chip, ErrorText, Field, H1, Note, Screen, Section, Sub, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
 // Government helplines, as listed by NCW and the services themselves.
@@ -47,10 +47,14 @@ export default function Support() {
     setErr("");
     if (!q.trim()) return;
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("ai", { body: { mode: "guide", question: q.trim(), language: lang } });
-    setBusy(false);
-    if (error) return setErr("The guide is unavailable right now. The helplines above are always open.");
-    setAnswer(data.body);
+    try {
+      const data = await api<{ body: string }>("POST", "guide", { question: q.trim(), language: lang }, { timeoutMs: 40000 });
+      setAnswer(data.body);
+    } catch {
+      setErr("The guide is unavailable right now. The helplines above are always open.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

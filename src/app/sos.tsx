@@ -7,7 +7,7 @@ import { PinPad } from "@/components/PinPad";
 import { useApp } from "@/lib/app-state";
 import { isWeb } from "@/lib/layout";
 import { useSos } from "@/lib/sos";
-import type { Recipient } from "@/lib/supabase";
+import type { Recipient } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
 const STATUS: Record<Recipient["status"], { label: string; tone: "wait" | "sent" | "ack" | "fail" }> = {

@@ -2,7 +2,7 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { supabase } from "./supabase";
+import { api } from "./api";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -29,7 +29,7 @@ export async function setupChannels() {
 }
 
 /** Asks for notification permission and stores this phone's Expo push token on her profile. */
-export async function registerPush(userId: string): Promise<boolean> {
+export async function registerPush(_userId?: string): Promise<boolean> {
   try {
     await setupChannels();
     const perm = await Notifications.requestPermissionsAsync();
@@ -39,7 +39,7 @@ export async function registerPush(userId: string): Promise<boolean> {
       process.env.EXPO_PUBLIC_EAS_PROJECT_ID || (Constants.expoConfig?.extra?.eas?.projectId as string | undefined);
     if (!projectId) return true;
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    await supabase.from("profiles").update({ expo_push_token: token.data }).eq("id", userId);
+    await api("PATCH", "profile", { expo_push_token: token.data });
     return true;
   } catch {
     return false;

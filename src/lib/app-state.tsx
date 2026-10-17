@@ -1,20 +1,25 @@
-import type { Session } from "@supabase/supabase-js";
 import * as Localization from "expo-localization";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { api, getToken, onTokenChange, setToken, type Contact, type Profile } from "./api";
 import { translate, type Key, type Lang } from "./i18n";
-import { isConfigured, supabase, type Contact, type Profile } from "./supabase";
+
+type Session = { user: { id: string; email: string } };
 
 type Ctx = {
   ready: boolean;
-  configured: boolean;
   session: Session | null;
   profile: Profile | null;
   contacts: Contact[];
+  /** Set when the server can't be reached at start-up. */
+  offline: boolean;
   lang: Lang;
   t: (key: Key, vars?: Record<string, string | number>) => string;
   refresh: () => Promise<void>;
+  setContacts: (c: Contact[]) => void;
   updateProfile: (patch: Partial<Profile>) => Promise<void>;
   setLang: (l: Lang) => Promise<void>;
+  signIn: (token: string) => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -24,57 +29,63 @@ function deviceLang(): Lang {
   return code === "hi" || code === "bn" ? code : "en";
 }
 
+type Me = { user: { id: string; email: string }; profile: Profile; contacts: Contact[] };
+
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(!isConfigured);
+  const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [offline, setOffline] = useState(false);
   const [localLang, setLocalLang] = useState<Lang>(deviceLang());
 
-  const load = useCallback(async (uid: string | undefined) => {
-    if (!uid) {
+  const load = useCallback(async () => {
+    const t = await getToken();
+    if (!t) {
+      setSession(null);
       setProfile(null);
       setContacts([]);
       return;
     }
-    const [p, cts] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
-      supabase.from("trusted_contacts").select("*").eq("owner_id", uid).order("priority").order("created_at"),
-    ]);
-    if (p.data) setProfile(p.data as Profile);
-    if (cts.data) setContacts(cts.data as Contact[]);
+    try {
+      const me = await api<Me>("GET", "me");
+      setSession({ user: me.user });
+      setProfile(me.profile);
+      setContacts(me.contacts);
+      setOffline(false);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (status === 401) {
+        setSession(null);
+        setProfile(null);
+      } else {
+        setOffline(true);
+      }
+    }
   }, []);
 
   useEffect(() => {
-    if (!isConfigured) return;
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      await load(data.session?.user.id).catch(() => {});
-      setReady(true);
+    // Start after the first render; load() only sets state once storage and the network answer.
+    const id = setTimeout(() => {
+      load().finally(() => setReady(true));
+    }, 0);
+    const off = onTokenChange((t) => {
+      if (!t) {
+        setSession(null);
+        setProfile(null);
+        setContacts([]);
+      }
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      load(s?.user.id).catch(() => {});
-    });
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      clearTimeout(id);
+      off();
+    };
   }, [load]);
 
-  const refresh = useCallback(() => load(session?.user.id), [load, session?.user.id]);
-
-  const updateProfile = useCallback(
-    async (patch: Partial<Profile>) => {
-      if (!session) return;
-      const { data, error } = await supabase
-        .from("profiles")
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq("id", session.user.id)
-        .select("*")
-        .single();
-      if (error) throw new Error(error.message);
-      setProfile(data as Profile);
-    },
-    [session],
-  );
+  const updateProfile = useCallback(async (patch: Partial<Profile>) => {
+    const r = await api<{ profile: Profile }>("PATCH", "profile", patch);
+    setProfile(r.profile);
+  }, []);
 
   const lang: Lang = profile?.language ?? localLang;
 
@@ -86,11 +97,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [session, updateProfile],
   );
 
+  const signIn = useCallback(
+    async (token: string) => {
+      await setToken(token);
+      await load();
+    },
+    [load],
+  );
+
+  const signOut = useCallback(async () => {
+    await setToken(null);
+  }, []);
+
   const t = useCallback((key: Key, vars?: Record<string, string | number>) => translate(lang, key, vars), [lang]);
 
   const value = useMemo(
-    () => ({ ready, configured: isConfigured, session, profile, contacts, lang, t, refresh, updateProfile, setLang }),
-    [ready, session, profile, contacts, lang, t, refresh, updateProfile, setLang],
+    () => ({ ready, session, profile, contacts, offline, lang, t, refresh: load, setContacts, updateProfile, setLang, signIn, signOut }),
+    [ready, session, profile, contacts, offline, lang, t, load, updateProfile, setLang, signIn, signOut],
   );
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }

@@ -3,9 +3,8 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Text, View } from "react-native";
 import { Button, Chip, ErrorText, Field, H1, Note, Screen, Sub } from "@/components/ui";
-import { useApp } from "@/lib/app-state";
 import { geohash } from "@/lib/geo";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
 const CATS = [
@@ -19,7 +18,6 @@ const BANDS = ["morning", "afternoon", "evening", "night"] as const;
 
 export default function ReportArea() {
   const router = useRouter();
-  const { session } = useApp();
   const [cat, setCat] = useState<(typeof CATS)[number][0]>("poor_lighting");
   const [band, setBand] = useState<(typeof BANDS)[number]>("night");
   const [label, setLabel] = useState("");
@@ -33,14 +31,12 @@ export default function ReportArea() {
       const p = await Location.requestForegroundPermissionsAsync();
       if (!p.granted) throw new Error("Allow location so the report lands in the right area.");
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { error } = await supabase.from("community_reports").insert({
-        reporter_id: session!.user.id,
+      await api("POST", "reports", {
         geohash6: geohash(loc.coords.latitude, loc.coords.longitude, 6),
         area_label: label.trim() || null,
         category: cat,
         time_band: band,
       });
-      if (error) throw new Error(error.message);
       router.back();
     } catch (e) {
       setErr((e as Error).message);

@@ -10,7 +10,7 @@ import { nearbyCells } from "@/lib/geo";
 import type { Lang } from "@/lib/i18n";
 import { isWeb } from "@/lib/layout";
 import { useSos } from "@/lib/sos";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { c, f, hardShadow } from "@/lib/theme";
 
 const CATEGORY: Record<string, string> = {
@@ -22,7 +22,7 @@ const CATEGORY: Record<string, string> = {
 };
 
 type Area = { geohash6: string; area_label: string | null; category: string; time_band: string; reporters: number };
-type GuardianAlert = { id: string; owner_id: string; started_at: string };
+type GuardianAlert = { id: string; owner_id: string; owner_name: string; started_at: string; duress: boolean };
 type Insight = { threadId: string; title: string; afterBlock: number; total: number } | null;
 
 export default function Home() {
@@ -36,35 +36,31 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       let alive = true;
+      let guardianTimer: ReturnType<typeof setInterval> | null = null;
       (async () => {
         const uid = session?.user.id;
         if (!uid) return;
-        // Alerts from people who list me as a guardian (RLS only returns those).
-        const g = await supabase.from("alerts").select("id, owner_id, started_at").neq("owner_id", uid).eq("status", "active");
-        if (alive && g.data) setGuardian(g.data as GuardianAlert[]);
+        const poll = async () => {
+          const g = await api<{ alerts: GuardianAlert[] }>("GET", "guardian/alerts").catch(() => null);
+          if (alive && g) setGuardian(g.alerts);
+        };
+        await poll();
+        guardianTimer = setInterval(poll, 15000);
 
-        // Pattern insight: contact after blocking in the most active thread.
-        const th = await supabase.from("pattern_threads").select("id, title").order("created_at", { ascending: false }).limit(5);
-        for (const thread of th.data ?? []) {
-          const e = await supabase.from("pattern_entries").select("kind, occurred_at").eq("thread_id", thread.id).order("occurred_at");
-          const rows = e.data ?? [];
-          const blocked = rows.find((r) => r.kind === "blocked");
-          const after = blocked ? rows.filter((r) => r.occurred_at > blocked.occurred_at && r.kind !== "blocked").length : 0;
-          if (rows.length) {
-            if (alive) setInsight({ threadId: thread.id, title: thread.title, afterBlock: after, total: rows.length });
-            break;
-          }
-        }
+        const ins = await api<{ insight: Insight }>("GET", "insight").catch(() => null);
+        if (alive && ins) setInsight(ins.insight);
 
         const perm = await Location.getForegroundPermissionsAsync();
         if (!perm.granted) return;
-        const loc = await Location.getLastKnownPositionAsync({ maxAge: 30 * 60 * 1000 });
+        const loc = await Location.getLastKnownPositionAsync({ maxAge: 30 * 60 * 1000 }).catch(() => null);
         if (!loc) return;
-        const { data } = await supabase.rpc("area_safety", { cells: nearbyCells(loc.coords.latitude, loc.coords.longitude) });
-        if (alive && data) setAreas(data as Area[]);
+        const cells = nearbyCells(loc.coords.latitude, loc.coords.longitude).join(",");
+        const r = await api<{ areas: Area[] }>("GET", `areas?cells=${cells}`).catch(() => null);
+        if (alive && r) setAreas(r.areas);
       })().catch(() => {});
       return () => {
         alive = false;
+        if (guardianTimer) clearInterval(guardianTimer);
       };
     }, [session?.user.id]),
   );
@@ -95,7 +91,7 @@ export default function Home() {
       {guardian.map((g) => (
         <Pressable key={g.id} onPress={() => router.push({ pathname: "/guardian/[id]", params: { id: g.id } })} style={{ marginBottom: 12 }}>
           <Card bg={c.sos}>
-            <Text style={{ fontFamily: f.displayBold, fontSize: 17, color: c.white }}>Someone in your care needs help</Text>
+            <Text style={{ fontFamily: f.displayBold, fontSize: 17, color: c.white }}>{(g.owner_name || "Someone in your care").split(" ")[0]} needs help</Text>
             <Text style={{ fontFamily: f.body, fontSize: 13.5, color: c.white, marginTop: 2 }}>
               Alert started {new Date(g.started_at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}. Tap to see where she is.
             </Text>

@@ -1,4 +1,4 @@
-import type { EntryKind, PatternEntry } from "./supabase";
+import type { EntryKind, PatternEntry } from "./api";
 import { c } from "./theme";
 
 export const KIND: Record<EntryKind, { label: string; color: string }> = {

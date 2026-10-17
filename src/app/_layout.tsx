@@ -62,6 +62,7 @@ function Shell() {
         <Stack.Screen name="settings" options={{ presentation: "modal" }} />
         <Stack.Screen name="report-area" options={{ presentation: "modal" }} />
         <Stack.Screen name="guardian/[id]" />
+        <Stack.Screen name="join" />
       </Stack>
     </SosProvider>
   );

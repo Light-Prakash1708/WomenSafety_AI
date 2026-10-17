@@ -15,6 +15,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
       - run: npx eslint src
       - run: npx expo export --platform android --output-dir /tmp/expo-export

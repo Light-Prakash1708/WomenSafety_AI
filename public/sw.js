@@ -1,7 +1,7 @@
 // SAAHI service worker: keeps the app shell available on a weak connection.
 // Pages: network first, cached copy if offline. Built assets and fonts: cache first.
-// API calls (Supabase) are never cached.
-const CACHE = "saahi-shell-v1";
+// API calls (/api) are never cached.
+const CACHE = "saahi-shell-v2";
 const scope = self.registration.scope;
 
 self.addEventListener("install", (e) => {
@@ -20,6 +20,10 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+
+  // The API and the contact tracking page are always fetched live.
+  const path = url.pathname.slice(new URL(scope).pathname.length - 1);
+  if (path.startsWith("/api") || path.startsWith("/track")) return;
 
   if (req.mode === "navigate") {
     e.respondWith(

@@ -3,9 +3,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Button, Chip, ErrorText, Field, H1, Note, Screen, Sub } from "@/components/ui";
-import { useApp } from "@/lib/app-state";
 import { KIND } from "@/lib/pattern";
-import { supabase, type EntryKind } from "@/lib/supabase";
+import { api, type EntryKind } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 import { addToVault } from "@/lib/vault";
 
@@ -19,7 +18,6 @@ const WHEN = [
 export default function NewEntry() {
   const router = useRouter();
   const params = useLocalSearchParams<{ thread?: string }>();
-  const { session } = useApp();
   const [threadId, setThreadId] = useState<string | null>(params.thread || null);
   const [threads, setThreads] = useState<{ id: string; title: string }[]>([]);
   const [kind, setKind] = useState<EntryKind>("message");
@@ -33,14 +31,12 @@ export default function NewEntry() {
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    supabase
-      .from("pattern_threads")
-      .select("id, title")
-      .order("created_at", { ascending: false })
-      .then(({ data }) => {
-        setThreads(data ?? []);
-        if (!threadId && data?.[0]) setThreadId(data[0].id);
-      });
+    api<{ threads: { id: string; title: string }[] }>("GET", "threads")
+      .then(({ threads: list }) => {
+        setThreads(list);
+        if (!threadId && list[0]) setThreadId(list[0].id);
+      })
+      .catch(() => {});
   }, [threadId]);
 
   const occurredAt = (): Date => {
@@ -70,8 +66,7 @@ export default function NewEntry() {
     try {
       let tid = threadId;
       if (!tid) {
-        const { data } = await supabase.from("pattern_threads").insert({ owner_id: session!.user.id, title: "Unwanted contact" }).select("id").single();
-        tid = data?.id ?? null;
+        tid = (await api<{ thread: { id: string } }>("POST", "threads", { title: "Unwanted contact" })).thread.id;
       }
       if (!tid) throw new Error("Couldn't create a thread. Check your connection.");
       let vaultId: string | null = null;
@@ -86,9 +81,7 @@ export default function NewEntry() {
         });
         vaultId = v.id;
       }
-      const { error } = await supabase.from("pattern_entries").insert({
-        owner_id: session!.user.id,
-        thread_id: tid,
+      await api("POST", `threads/${tid}/entries`, {
         kind,
         occurred_at: occurredAt().toISOString(),
         channel: channel.trim() || null,
@@ -96,7 +89,6 @@ export default function NewEntry() {
         note: note.trim() || null,
         vault_item_id: vaultId,
       });
-      if (error) throw new Error(error.message);
       router.back();
     } catch (e) {
       setErr((e as Error).message);

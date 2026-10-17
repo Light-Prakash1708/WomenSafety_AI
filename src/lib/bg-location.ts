@@ -3,12 +3,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { supabase } from "./supabase";
+import { api } from "./api";
 
 export const BG_TASK = "saahi-live-location";
 const ACTIVE_KEY = "saahi.active-share";
 
-type Share = { alertId?: string; journeyId?: string; ownerId: string };
+type Share = { alertId?: string; journeyId?: string; ownerId?: string };
 
 export async function setActiveShare(s: Share | null) {
   if (s) await AsyncStorage.setItem(ACTIVE_KEY, JSON.stringify(s));
@@ -25,10 +25,10 @@ export async function pushLocation(loc: Location.LocationObject, share?: Share |
   if (!s) return;
   const { latitude: lat, longitude: lng, accuracy } = loc.coords;
   if (s.alertId && !s.alertId.startsWith("local-")) {
-    await supabase.from("alert_locations").insert({ alert_id: s.alertId, owner_id: s.ownerId, lat, lng, accuracy });
+    await api("POST", `alerts/${s.alertId}/locations`, { lat, lng, accuracy });
   }
   if (s.journeyId) {
-    await supabase.from("journeys").update({ last_lat: lat, last_lng: lng }).eq("id", s.journeyId);
+    await api("POST", `journeys/${s.journeyId}/location`, { lat, lng });
   }
 }
 

@@ -9,7 +9,7 @@ import { pushLocation, setActiveShare, startBackgroundShare, stopBackgroundShare
 import { cancelScheduled, scheduleCheckin } from "@/lib/notifications";
 import { usePrefs } from "@/lib/prefs";
 import { useSos } from "@/lib/sos";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
 type Journey = { id: string; destination: string; interval_minutes: number; next_checkin_at: string; started_at: string };
@@ -36,15 +36,11 @@ export default function Walk() {
 
   useFocusEffect(
     useCallback(() => {
-      supabase
-        .from("journeys")
-        .select("id, destination, interval_minutes, next_checkin_at, started_at")
-        .eq("owner_id", session?.user.id ?? "")
-        .eq("status", "active")
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .then(({ data }) => setJourney((data?.[0] as Journey) ?? null));
-    }, [session?.user.id]),
+      if (!session) return;
+      api<{ journey: Journey | null }>("GET", "journeys/active")
+        .then((r) => setJourney(r.journey))
+        .catch(() => {});
+    }, [session]),
   );
 
   // Countdown, then a 30-second grace, then SOS.
@@ -58,7 +54,8 @@ export default function Walk() {
       if (s <= -GRACE_S && !escalated.current) {
         escalated.current = true;
         startSos.current("walk").then(async () => {
-          await supabase.from("journeys").update({ status: "missed", ended_at: new Date().toISOString() }).eq("id", journey.id);
+          await api("POST", `journeys/${journey.id}/end`, { status: "missed" }).catch(() => {});
+          setJourney(null);
         });
       }
     };
@@ -73,14 +70,22 @@ export default function Walk() {
     if (!contacts.length) return setErr("Add someone to your circle first, so a missed check-in reaches a person.");
     setBusy(true);
     const perm = await Location.requestForegroundPermissionsAsync();
-    const next = new Date(Date.now() + minutes * 60000).toISOString();
-    const { data, error } = await supabase
-      .from("journeys")
-      .insert({ owner_id: session!.user.id, destination: dest.trim(), interval_minutes: minutes, next_checkin_at: next })
-      .select("id, destination, interval_minutes, next_checkin_at, started_at")
-      .single();
+    const here = perm.granted ? await Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 }).catch(() => null) : null;
+    let data: Journey;
+    try {
+      data = (
+        await api<{ journey: Journey }>("POST", "journeys", {
+          destination: dest.trim(),
+          interval_minutes: minutes,
+          lat: here?.coords.latitude ?? null,
+          lng: here?.coords.longitude ?? null,
+        })
+      ).journey;
+    } catch {
+      setBusy(false);
+      return setErr("Couldn't start the journey. Check your internet; the SOS button still works offline.");
+    }
     setBusy(false);
-    if (error || !data) return setErr("Couldn't start the journey. Check your internet; the SOS button still works offline.");
     await setPrefs({ checkinMinutes: minutes });
     setJourney(data as Journey);
     notifId.current = await scheduleCheckin(minutes * 60, data.destination);
@@ -94,17 +99,23 @@ export default function Walk() {
 
   const checkIn = async () => {
     if (!journey) return;
-    const next = new Date(Date.now() + journey.interval_minutes * 60000).toISOString();
-    await supabase.from("journeys").update({ next_checkin_at: next }).eq("id", journey.id);
+    let next: Journey;
+    try {
+      next = (await api<{ journey: Journey }>("POST", `journeys/${journey.id}/checkin`)).journey;
+    } catch (e) {
+      setErr((e as Error).message);
+      return;
+    }
+    setErr("");
     await cancelScheduled(notifId.current);
     notifId.current = await scheduleCheckin(journey.interval_minutes * 60, journey.destination);
-    setJourney({ ...journey, next_checkin_at: next });
+    setJourney(next);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
 
   const end = async (status: "arrived" | "cancelled") => {
     if (!journey) return;
-    await supabase.from("journeys").update({ status, ended_at: new Date().toISOString() }).eq("id", journey.id);
+    await api("POST", `journeys/${journey.id}/end`, { status }).catch(() => {});
     await cancelScheduled(notifId.current);
     if (!sos.alert) {
       await stopBackgroundShare();
@@ -158,6 +169,7 @@ export default function Walk() {
             <Button tone="ok" label="I'm okay" onPress={checkIn} style={{ flex: 1 }} />
             <Button tone="ghost" label="I've arrived" onPress={() => end("arrived")} style={{ flex: 1 }} />
           </View>
+          <ErrorText>{err}</ErrorText>
           <Button tone="danger" label="I don't feel safe: send SOS" onPress={() => sos.start("manual")} style={{ marginTop: 12 }} />
           <Ladder />
           <Button tone="ghost" label="Cancel journey" onPress={() => end("cancelled")} style={{ marginTop: 14 }} />

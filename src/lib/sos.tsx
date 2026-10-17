@@ -25,7 +25,7 @@ import { pushLocation, setActiveShare, startBackgroundShare, stopBackgroundShare
 import { mapsLink } from "./geo";
 import { checkPin, type PinResult } from "./pins";
 import { getPrefs, usePrefs } from "./prefs";
-import { supabase, trackPageUrl, type Recipient } from "./supabase";
+import { api, trackPageUrl, type AlertRow, type Recipient } from "./api";
 import { addToVault } from "./vault";
 
 export type Trigger = "hold" | "shake" | "walk" | "manual";
@@ -83,7 +83,6 @@ export function SosProvider({ children }: { children: ReactNode }) {
 
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastPushRef = useRef(0);
   const alertRef = useRef<ActiveAlert | null>(null);
   const backgroundSharingRef = useRef(false);
@@ -138,11 +137,7 @@ export function SosProvider({ children }: { children: ReactNode }) {
         const state: SmsState = result === "sent" ? "sent" : result === "cancelled" ? "cancelled" : "opened";
         setSms(state);
         if (a && !a.local && state !== "cancelled") {
-          await supabase
-            .from("alert_recipients")
-            .update({ status: "sent", updated_at: new Date().toISOString() })
-            .eq("alert_id", a.id)
-            .eq("status", "queued");
+          await api("POST", `alerts/${a.id}/sms-sent`).catch(() => {});
         }
       } catch {
         setSms("unavailable");
@@ -151,68 +146,30 @@ export function SosProvider({ children }: { children: ReactNode }) {
     [contacts, smsBody],
   );
 
-  const subscribe = useCallback((alertId: string) => {
-    channelRef.current?.unsubscribe();
-    const ch = supabase
-      .channel(`alert-${alertId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "alert_recipients", filter: `alert_id=eq.${alertId}` },
-        (payload) => {
-          const row = payload.new as Recipient;
-          if (!row?.id) return;
-          setRecipients((prev) => {
-            const i = prev.findIndex((r) => r.id === row.id);
-            if (i === -1) return [...prev, row];
-            const next = prev.slice();
-            next[i] = row;
-            return next;
-          });
-          if (row.status === "acknowledged") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-        },
-      )
-      .subscribe();
-    channelRef.current = ch;
-  }, []);
-
   const createServerAlert = useCallback(
     async (trigger: Trigger, loc: Location.LocationObject | null): Promise<ActiveAlert | null> => {
       if (!uid) return null;
       try {
         const battery = await Battery.getBatteryLevelAsync().catch(() => null);
-        const { data, error } = await withTimeout(
-          supabase
-            .from("alerts")
-            .insert({
-              owner_id: uid,
-              trigger,
-              channel: "data",
-              battery,
-              last_lat: loc?.coords.latitude ?? null,
-              last_lng: loc?.coords.longitude ?? null,
-              last_accuracy: loc?.coords.accuracy ?? null,
-              last_seen_at: loc ? new Date(loc.timestamp).toISOString() : null,
-            })
-            .select("id, public_token")
-            .single(),
-          7000,
+        const r = await api<{ alert: AlertRow; recipients: Recipient[] }>(
+          "POST",
+          "alerts",
+          {
+            trigger,
+            battery: typeof battery === "number" && battery >= 0 ? battery : null,
+            lat: loc?.coords.latitude ?? null,
+            lng: loc?.coords.longitude ?? null,
+            accuracy: loc?.coords.accuracy ?? null,
+          },
+          { timeoutMs: 8000 },
         );
-        if (error || !data) return null;
-        if (contacts.length) {
-          const { data: recips } = await supabase
-            .from("alert_recipients")
-            .insert(contacts.map((c) => ({ alert_id: data.id, owner_id: uid, contact_id: c.id, name: c.name, channel: "sms" })))
-            .select("*");
-          setRecipients((recips as Recipient[]) ?? []);
-        }
-        if (loc) await pushLocation(loc, { alertId: data.id, ownerId: uid }).catch(() => {});
-        supabase.functions.invoke("sos-dispatch", { body: { alert_id: data.id } }).catch(() => {});
-        return { id: data.id, token: data.public_token, local: false, startedAt: Date.now(), trigger };
+        setRecipients(r.recipients);
+        return { id: r.alert.id, token: r.alert.public_token, local: false, startedAt: Date.now(), trigger };
       } catch {
         return null;
       }
     },
-    [uid, contacts],
+    [uid],
   );
 
   const startRecording = useCallback(async () => {
@@ -257,8 +214,6 @@ export function SosProvider({ children }: { children: ReactNode }) {
     watchRef.current = null;
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = null;
-    channelRef.current?.unsubscribe();
-    channelRef.current = null;
     await stopBackgroundShare();
     await setActiveShare(null);
     setBackgroundSharing(false);
@@ -294,7 +249,6 @@ export function SosProvider({ children }: { children: ReactNode }) {
       alertRef.current = a;
       setAlert(a);
       if (!server) setOnline(false);
-      if (server) subscribe(server.id);
 
       // SMS goes out regardless of the server, so it works with no data.
       sendSms(a, loc);
@@ -318,7 +272,7 @@ export function SosProvider({ children }: { children: ReactNode }) {
       tickRef.current = setInterval(() => setRecordingSecs((s) => s + 1), 1000);
       if ((await getPrefs()).recordAudio) startRecording();
     },
-    [router, getFix, createServerAlert, subscribe, sendSms, uid, startRecording],
+    [router, getFix, createServerAlert, sendSms, uid, startRecording],
   );
 
   // Retry creating the server alert while offline, so the live link starts working once data returns.
@@ -338,29 +292,27 @@ export function SosProvider({ children }: { children: ReactNode }) {
         alertRef.current = next;
         setAlert(next);
         setOnline(true);
-        subscribe(server.id);
         if (uid) await setActiveShare({ alertId: server.id, ownerId: uid });
       }
     }, 20000);
     return () => clearInterval(id);
-  }, [isLocal, phase, createServerAlert, subscribe, uid]);
+  }, [isLocal, phase, createServerAlert, uid]);
 
-  // Poll as well as listen: realtime can drop on weak networks, and a missed "On it"
-  // is exactly the update she needs to see.
+  // Poll for "On it" from her circle. Short interval: this is the update she most needs to see.
   const serverAlertId = alert && !alert.local ? alert.id : null;
   useEffect(() => {
     if (!serverAlertId || phase === "idle") return;
     let lastAcked = -1;
     const poll = async () => {
-      const { data } = await supabase.from("alert_recipients").select("*").eq("alert_id", serverAlertId);
-      if (!data) return;
-      const rows = data as Recipient[];
+      const r = await api<{ recipients: Recipient[] }>("GET", `alerts/${serverAlertId}`).catch(() => null);
+      if (!r) return;
+      const rows = r.recipients;
       const acked = rows.filter((r) => r.status === "acknowledged").length;
       if (lastAcked >= 0 && acked > lastAcked) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       lastAcked = acked;
       setRecipients(rows);
     };
-    const id = setInterval(poll, 8000);
+    const id = setInterval(poll, 5000);
     return () => clearInterval(id);
   }, [serverAlertId, phase]);
 
@@ -372,19 +324,13 @@ export function SosProvider({ children }: { children: ReactNode }) {
       if (!a || res === "wrong") return res;
       if (res === "duress") {
         // Looks cancelled on her screen. Helpers are told it may have been forced.
-        if (!a.local) await supabase.from("alerts").update({ duress: true }).eq("id", a.id).then(() => {}, () => {});
+        if (!a.local) await api("POST", `alerts/${a.id}/duress`).catch(() => {});
         setPhase("duress");
         return res;
       }
       await stopRecordingToVault(a.id);
       await stopStreams();
-      if (!a.local) {
-        await supabase
-          .from("alerts")
-          .update({ status: "cancelled", ended_at: new Date().toISOString() })
-          .eq("id", a.id)
-          .then(() => {}, () => {});
-      }
+      if (!a.local) await api("POST", `alerts/${a.id}/cancel`).catch(() => {});
       alertRef.current = null;
       setAlert(null);
       setPhase("idle");

@@ -1,19 +1,32 @@
 import { Redirect } from "expo-router";
+import { useState } from "react";
 import { Text, View } from "react-native";
+import { Button } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
 import { c, f } from "@/lib/theme";
 
 export default function Gate() {
-  const { configured, session, profile } = useApp();
+  const { session, profile, offline, refresh } = useApp();
+  const [busy, setBusy] = useState(false);
 
-  if (!configured) {
+  if (offline && !profile) {
     return (
-      <View style={{ flex: 1, padding: 28, justifyContent: "center", backgroundColor: c.paper, gap: 12 }}>
-        <Text style={{ fontFamily: f.display, fontSize: 28, color: c.ink }}>Connect your backend</Text>
-        <Text style={{ fontFamily: f.body, fontSize: 15, color: c.muted, lineHeight: 22 }}>
-          SAAHI needs a Supabase project. Copy .env.example to .env, add EXPO_PUBLIC_SUPABASE_URL and
-          EXPO_PUBLIC_SUPABASE_ANON_KEY, then restart with npx expo start --clear. The README walks through it.
-        </Text>
+      <View style={{ flex: 1, padding: 28, justifyContent: "center", alignItems: "center", backgroundColor: c.paper }}>
+        <View style={{ width: "100%", maxWidth: 420, gap: 12 }}>
+          <Text style={{ fontFamily: f.display, fontSize: 28, color: c.ink }}>Can't reach SAAHI</Text>
+          <Text style={{ fontFamily: f.body, fontSize: 15, color: c.muted, lineHeight: 22 }}>
+            Check your internet connection and try again. In an emergency, call 112 directly.
+          </Text>
+          <Button
+            label="Try again"
+            loading={busy}
+            onPress={async () => {
+              setBusy(true);
+              await refresh();
+              setBusy(false);
+            }}
+          />
+        </View>
       </View>
     );
   }

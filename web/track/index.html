@@ -88,19 +88,18 @@
   </section>
 </main>
 
-<script src="config.js"></script>
 <script>
 (function () {
-  var cfg = window.SAAHI_CONFIG || {};
   var token = new URLSearchParams(location.search).get("t") || "";
-  var api = (cfg.supabaseUrl || "").replace(/\/$/, "") + "/functions/v1/alert-public";
+  // Served by the same Vercel deployment as the API.
+  var api = "/api/public/alert";
   var me = null;
   try { me = sessionStorage.getItem("saahi.me." + token); } catch (e) {}
   var acked = false;
   var $ = function (id) { return document.getElementById(id); };
 
   function headers() {
-    return { "Content-Type": "application/json", apikey: cfg.anonKey || "", Authorization: "Bearer " + (cfg.anonKey || "") };
+    return { "Content-Type": "application/json" };
   }
   function showError(msg) {
     $("loading").hidden = true; $("live").hidden = true;
@@ -164,7 +163,6 @@
 
   function load() {
     if (!/^[a-f0-9]{36}$/.test(token)) return showError("This link isn't complete. Ask her, or the person who sent it, for the full link.");
-    if (!cfg.supabaseUrl || cfg.supabaseUrl.indexOf("YOUR-") !== -1) return showError("This page isn't set up yet: add your Supabase URL and key to config.js.");
     fetch(api + "?t=" + token, { headers: headers() })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) { if (!res.ok) return showError(res.j.error || "Couldn't load this alert."); render(res.j); })
