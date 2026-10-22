@@ -59,7 +59,10 @@
     "build:android": "npx eas-cli@latest build -p android --profile preview",
     "build:ios": "npx eas-cli@latest build -p ios --profile preview",
     "build:web": "expo export --platform web --output-dir dist && node scripts/postbuild.mjs",
-    "dev": "tsx scripts/dev-server.ts"
+    "dev": "tsx scripts/dev-server.ts",
+    "test:api": "node tests/run-api.mjs",
+    "test:e2e": "node tests/run-e2e.mjs",
+    "test": "npm run -s typecheck && npx eslint src && npm run -s test:api"
   },
   "private": true,
   "engines": {

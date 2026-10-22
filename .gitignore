@@ -44,3 +44,4 @@ yarn-error.*
 .env
 saahi-local.db*
 .vercel
+test-results/
