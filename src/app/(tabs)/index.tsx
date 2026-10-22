@@ -30,6 +30,15 @@ export default function Home() {
   const { profile, contacts, lang, setLang, t, session } = useApp();
   const sos = useSos();
   const [areas, setAreas] = useState<Area[]>([]);
+  const [flagged, setFlagged] = useState<string[]>([]);
+  const [flagOpen, setFlagOpen] = useState<string | null>(null);
+  const flagArea = async (a: Area, reason?: "names_a_person" | "wrong_place" | "outdated") => {
+    const key = a.geohash6 + a.category;
+    if (!reason) return setFlagOpen(flagOpen === key ? null : key);
+    await api("POST", "areas/flag", { geohash6: a.geohash6, category: a.category, reason }).catch(() => {});
+    setFlagged((f) => [...f, key]);
+    setFlagOpen(null);
+  };
   const [guardian, setGuardian] = useState<GuardianAlert[]>([]);
   const [insight, setInsight] = useState<Insight>(null);
 
@@ -178,8 +187,25 @@ export default function Home() {
             </Text>
             <Text style={{ fontFamily: f.body, fontSize: 12.5, color: c.muted }}>
               {a.area_label ? `${a.area_label} · ` : ""}
-              {a.reporters} women reported this. No names or routines are shared.
+              {a.reporters} women reported this in the last 90 days. No names or routines are shared.
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => flagArea(a)}
+              disabled={flagged.includes(a.geohash6 + a.category)}
+              style={{ marginTop: 6, alignSelf: "flex-start" }}
+            >
+              <Text style={{ fontFamily: f.bodySemi, fontSize: 12, color: c.ink, textDecorationLine: "underline" }}>
+                {flagged.includes(a.geohash6 + a.category) ? "Thanks. Flagged for review." : "Wrong, or names a person? Flag it"}
+              </Text>
+            </Pressable>
+            {flagOpen === a.geohash6 + a.category && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                <Chip label="Names a person" onPress={() => flagArea(a, "names_a_person")} />
+                <Chip label="Wrong place" onPress={() => flagArea(a, "wrong_place")} />
+                <Chip label="Not true any more" onPress={() => flagArea(a, "outdated")} />
+              </View>
+            )}
           </Card>
         ))
       ) : (

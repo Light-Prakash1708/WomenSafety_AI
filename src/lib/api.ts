@@ -189,6 +189,9 @@ export type PatternEntry = {
   handle: string | null;
   note: string | null;
   vault_item_id: string | null;
+  source_ref?: string | null;
+  revision?: number;
+  updated_at?: string | null;
 };
 
 export type VaultItem = {

@@ -38,6 +38,11 @@ const ALERT_SILENCE_HOURS = 24; // active alert with no location or heartbeat fo
 const STALE_LOCATION_SECONDS = 120;
 const MAX_FIX_AGE_HOURS = 24;
 const MAX_PASSWORD = 200;
+const REPORT_DEDUPE_DAYS = 30; // the same person reporting the same thing in the same cell refreshes, never adds
+const REPORT_VISIBLE_DAYS = 90; // reports older than this stop counting
+const REPORT_RETAIN_DAYS = 180; // and are deleted after this
+const FLAGS_TO_HIDE = 3; // distinct people flagging an area entry hides it until reviewed
+const FLAG_REASONS = ["names_a_person", "wrong_place", "outdated", "other"];
 const ENTRY_KINDS = ["message", "new_account", "call", "in_person", "blocked", "threat", "other"];
 const VAULT_KINDS = ["photo", "audio", "screenshot", "document", "note"];
 const VAULT_SOURCES = ["upload", "sos_recording", "pattern"];
@@ -223,6 +228,24 @@ async function endAlert(alertId: string, status: "cancelled" | "expired" | "reso
   ]);
 }
 
+/** Latest time any entry was added or corrected. */
+function latestChange(entries: { created_at: string; updated_at?: string | null }[]): string | null {
+  let latest: string | null = null;
+  for (const x of entries) {
+    const t = x.updated_at && x.updated_at > x.created_at ? x.updated_at : x.created_at;
+    if (!latest || t > latest) latest = t;
+  }
+  return latest;
+}
+
+/** A summary is out of date once entries were added, removed or corrected after it was drafted. */
+function summaryFreshness(summary: Record<string, any>, entries: Record<string, any>[]) {
+  if (summary.basis_count == null) return { stale: null as boolean | null, basis_count: null, basis_latest: null };
+  const latest = latestChange(entries as { created_at: string; updated_at?: string | null }[]);
+  const stale = entries.length !== Number(summary.basis_count) || (latest != null && summary.basis_latest != null && latest > summary.basis_latest);
+  return { stale, basis_count: Number(summary.basis_count), basis_latest: summary.basis_latest };
+}
+
 // ---------------------------------------------------------------------------
 // Maintenance: SafeWalk watchdog, push retries and receipts, alert expiry, upload cleanup.
 // Runs on the daily cron, on /api/cron/watchdog (point a pinger at it for minute-level checks),
@@ -277,6 +300,7 @@ export async function maintenance(origin: string) {
     { sql: `delete from rate_limits where expires < ?`, args: [Date.now()] },
     { sql: `delete from login_attempts where at < ?`, args: [Date.now() - 86400_000] },
     { sql: `delete from audit_log where at < ?`, args: [ago(365 * 86400_000)] },
+    { sql: `delete from reports where created_at < ?`, args: [ago(REPORT_RETAIN_DAYS * 86400_000)] },
   ]);
   return { ...journeys, ...pushes, expiredAlerts: stale.length, abandonedUploads: abandoned.length };
 }
@@ -435,6 +459,8 @@ async function route(c: Ctx): Promise<Response> {
         ]),
         ...["vault_items", "vault_log", "entries", "summaries", "threads", "journeys", "alerts", "contacts", "audit_log"].map((t) => ({ sql: `delete from ${t} where owner_id = ?`, args: [uid] })),
         { sql: `delete from reports where reporter_id = ?`, args: [uid] },
+        { sql: `delete from report_flags where flagger_id = ?`, args: [uid] },
+        { sql: `delete from entry_revisions where owner_id = ?`, args: [uid] },
         { sql: `update contacts set linked_user_id = null, linked_at = null where linked_user_id = ?`, args: [uid] },
         { sql: `update audit_log set actor_id = null where actor_id = ?`, args: [uid] },
         { sql: `delete from profiles where id = ?`, args: [uid] },
@@ -764,9 +790,45 @@ async function route(c: Ctx): Promise<Response> {
       const th = await one<{ id: string; title: string }>(`select id, title, created_at from threads where id = ? and owner_id = ?`, [b, uid]);
       if (!th) throw new HttpError(404, "Thread not found.");
       if (!d && m === "GET") {
-        const entries = await all(`select * from entries where thread_id = ? order by occurred_at desc`, [b]);
-        const summary = await one(`select id, body, source, edited, created_at from summaries where thread_id = ? order by created_at desc limit 1`, [b]);
-        return json({ thread: th, entries, summary });
+        const entries = await all<Record<string, any>>(`select * from entries where thread_id = ? order by occurred_at desc`, [b]);
+        const summary = await one<Record<string, any>>(
+          `select id, body, source, edited, created_at, basis_count, basis_latest from summaries where thread_id = ? order by created_at desc limit 1`,
+          [b],
+        );
+        return json({ thread: th, entries, summary: summary ? { ...summary, ...summaryFreshness(summary, entries) } : null });
+      }
+      // Corrections keep the earlier version, so a timeline shown to someone can always be explained.
+      if (d === "entries" && e && m === "PATCH") {
+        const cur = await one<Record<string, any>>(`select * from entries where id = ? and thread_id = ? and owner_id = ?`, [e, b, uid]);
+        if (!cur) throw new HttpError(404, "Entry not found.");
+        const next = {
+          kind: "kind" in body ? String(body.kind) : cur.kind,
+          occurred_at: "occurred_at" in body ? iso(body.occurred_at) : cur.occurred_at,
+          channel: "channel" in body ? str(body.channel, 120) : cur.channel,
+          handle: "handle" in body ? str(body.handle, 120) : cur.handle,
+          note: "note" in body ? str(body.note, 4000) : cur.note,
+          source_ref: "source_ref" in body ? str(body.source_ref, 200) : cur.source_ref,
+        };
+        if (!ENTRY_KINDS.includes(next.kind)) throw new HttpError(400, "Pick what happened.");
+        if (!next.occurred_at) throw new HttpError(400, "That time isn't valid.");
+        const same = (["kind", "occurred_at", "channel", "handle", "note", "source_ref"] as const).every((k) => (next[k] ?? null) === (cur[k] ?? null));
+        if (same) return json({ entry: cur });
+        const t = now();
+        await batch([
+          {
+            sql: `insert into entry_revisions (entry_id, owner_id, revision, kind, occurred_at, channel, handle, note, source_ref, reason, replaced_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [e, uid, cur.revision ?? 1, cur.kind, cur.occurred_at, cur.channel, cur.handle, cur.note, cur.source_ref ?? null, str(body.reason, 200), t],
+          },
+          {
+            sql: `update entries set kind = ?, occurred_at = ?, channel = ?, handle = ?, note = ?, source_ref = ?, revision = coalesce(revision, 1) + 1, updated_at = ? where id = ? and owner_id = ?`,
+            args: [next.kind, next.occurred_at, next.channel, next.handle, next.note, next.source_ref, t, e, uid],
+          },
+        ]);
+        return json({ entry: await one(`select * from entries where id = ?`, [e]) });
+      }
+      if (d === "entries" && e && parts[4] === "revisions" && m === "GET") {
+        if (!(await one(`select 1 from entries where id = ? and thread_id = ? and owner_id = ?`, [e, b, uid]))) throw new HttpError(404, "Entry not found.");
+        return json({ revisions: await all(`select revision, kind, occurred_at, channel, handle, note, source_ref, reason, replaced_at from entry_revisions where entry_id = ? and owner_id = ? order by revision`, [e, uid]) });
       }
       if (d === "entries" && m === "POST") {
         const kind = String(body.kind);
@@ -775,20 +837,32 @@ async function route(c: Ctx): Promise<Response> {
         if (vaultId && !(await one(`select 1 from vault_items where id = ? and owner_id = ?`, [vaultId, uid]))) vaultId = null;
         const id = uuid();
         await run(
-          `insert into entries (id, owner_id, thread_id, kind, occurred_at, channel, handle, note, vault_item_id, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [id, uid, b, kind, iso(body.occurred_at) ?? now(), str(body.channel, 120), str(body.handle, 120), str(body.note, 4000), vaultId, now()],
+          `insert into entries (id, owner_id, thread_id, kind, occurred_at, channel, handle, note, vault_item_id, source_ref, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, uid, b, kind, iso(body.occurred_at) ?? now(), str(body.channel, 120), str(body.handle, 120), str(body.note, 4000), vaultId, str(body.source_ref, 200), now(), now()],
         );
         return json({ entry: await one(`select * from entries where id = ?`, [id]) }, 201);
       }
       if (d === "summary" && m === "POST") {
-        const entries = await all<Entry>(`select kind, occurred_at, channel, handle, note from entries where thread_id = ? order by occurred_at`, [b]);
+        const entries = await all<Entry & { created_at: string; updated_at: string | null }>(
+          `select kind, occurred_at, channel, handle, note, created_at, updated_at from entries where thread_id = ? order by occurred_at`,
+          [b],
+        );
         const s = await summarize(entries);
-        if (entries.length) await run(`insert into summaries (id, owner_id, thread_id, body, source, created_at) values (?, ?, ?, ?, ?, ?)`, [uuid(), uid, b, s.body, s.source, now()]);
-        return json(s);
+        const basis = { basis_count: entries.length, basis_latest: latestChange(entries) };
+        if (entries.length) {
+          await run(`insert into summaries (id, owner_id, thread_id, body, source, basis_count, basis_latest, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)`, [
+            uuid(), uid, b, s.body, s.source, basis.basis_count, basis.basis_latest, now(),
+          ]);
+        }
+        return json({ ...s, ...basis, stale: false });
       }
       if (d === "summary" && m === "PUT") {
         const text = need(str(body.body, 8000), "The summary can't be empty.");
-        await run(`insert into summaries (id, owner_id, thread_id, body, source, edited, created_at) values (?, ?, ?, ?, ?, 1, ?)`, [uuid(), uid, b, text, str(body.source, 10) ?? "ai", now()]);
+        // An edit keeps the basis of the summary it edits, so staleness still tells the truth.
+        const prev = await one<{ basis_count: number | null; basis_latest: string | null }>(`select basis_count, basis_latest from summaries where thread_id = ? order by created_at desc limit 1`, [b]);
+        await run(`insert into summaries (id, owner_id, thread_id, body, source, edited, basis_count, basis_latest, created_at) values (?, ?, ?, ?, ?, 1, ?, ?, ?)`, [
+          uuid(), uid, b, text, str(body.source, 10) ?? "ai", prev?.basis_count ?? null, prev?.basis_latest ?? null, now(),
+        ]);
         return json({ ok: true });
       }
     }
@@ -904,22 +978,68 @@ async function route(c: Ctx): Promise<Response> {
     const category = String(body.category);
     const band = String(body.time_band);
     if (!REPORT_CATEGORIES.includes(category) || !TIME_BANDS.includes(band)) throw new HttpError(400, "Pick what's wrong and when.");
-    await run(`insert into reports (id, reporter_id, geohash6, area_label, category, time_band, created_at) values (?, ?, ?, ?, ?, ?, ?)`, [uuid(), uid, cell, str(body.area_label, 80), category, band, now()]);
-    return json({ ok: true }, 201);
+    const label = str(body.area_label, 80);
+    // Same person, same spot, same problem within 30 days: refresh it instead of adding a second report.
+    const dup = await one<{ id: string }>(
+      `select id from reports where reporter_id = ? and geohash6 = ? and category = ? and created_at > ? order by created_at desc limit 1`,
+      [uid, cell, category, ago(REPORT_DEDUPE_DAYS * 86400_000)],
+    );
+    if (dup) {
+      await run(`update reports set time_band = ?, area_label = coalesce(?, area_label), created_at = ? where id = ?`, [band, label, now(), dup.id]);
+      return json({ ok: true, id: dup.id, duplicate: true });
+    }
+    const id = uuid();
+    await run(`insert into reports (id, reporter_id, geohash6, area_label, category, time_band, created_at) values (?, ?, ?, ?, ?, ?, ?)`, [id, uid, cell, label, category, band, now()]);
+    return json({ ok: true, id, duplicate: false }, 201);
+  }
+  if (a === "reports" && b === "mine" && m === "GET") {
+    return json({
+      reports: await all(`select id, geohash6, area_label, category, time_band, created_at from reports where reporter_id = ? order by created_at desc limit 200`, [uid]),
+    });
+  }
+  if (a === "reports" && b && b !== "mine" && !d && m === "DELETE") {
+    await run(`delete from reports where id = ? and reporter_id = ?`, [b, uid]);
+    return json({ ok: true });
+  }
+  // Anyone signed in can flag an area entry (e.g. it names a person). Enough flags hide it until reviewed.
+  if (a === "areas" && b === "flag" && m === "POST") {
+    await rateLimit(`flag:${uid}`, 20, 86400, "You've flagged a lot today. Try again tomorrow.");
+    const cell = String(body.geohash6 ?? "");
+    const category = String(body.category ?? "");
+    const reason = String(body.reason ?? "");
+    if (!/^[0-9b-hjkmnp-z]{6}$/.test(cell) || !REPORT_CATEGORIES.includes(category)) throw new HttpError(400, "Pick the area and what's wrong.");
+    if (!FLAG_REASONS.includes(reason)) throw new HttpError(400, "Pick a reason.");
+    await run(`insert or ignore into report_flags (geohash6, category, flagger_id, reason, created_at) values (?, ?, ?, ?, ?)`, [cell, category, uid, reason, now()]);
+    const n = await one<{ n: number }>(`select count(distinct flagger_id) as n from report_flags where geohash6 = ? and category = ?`, [cell, category]);
+    if ((n?.n ?? 0) >= FLAGS_TO_HIDE) {
+      await run(
+        `insert into area_moderation (geohash6, category, status, note, updated_at) values (?, ?, 'hidden', 'auto: flagged', ?)
+           on conflict(geohash6, category) do update set status = case when area_moderation.status = 'visible' then 'visible' else 'hidden' end, updated_at = excluded.updated_at`,
+        [cell, category, now()],
+      );
+      log("area_hidden_pending_review", { cell, category });
+    }
+    return json({ ok: true });
   }
   if (a === "areas" && m === "GET") {
     const cells = (c.url.searchParams.get("cells") ?? "").split(",").filter((x) => /^[0-9b-hjkmnp-z]{6}$/.test(x)).slice(0, 25);
     if (!cells.length) return json({ areas: [] });
-    const since = new Date(Date.now() - 180 * 86400000).toISOString();
+    const since = ago(REPORT_VISIBLE_DAYS * 86400_000);
+    // Shown only at 3+ different reporters in the last 90 days, never when hidden by moderation.
+    // A place name is shown only if 3+ different reporters typed the same one, so one person can't
+    // put a name (or a person) on the map.
     const rows = await all<Record<string, unknown>>(
-      `select geohash6, max(area_label) as area_label, category, count(distinct reporter_id) as reporters,
-              (select time_band from reports r2 where r2.geohash6 = r.geohash6 and r2.category = r.category group by time_band order by count(*) desc limit 1) as time_band
+      `select geohash6, category, count(distinct reporter_id) as reporters,
+              (select time_band from reports r2 where r2.geohash6 = r.geohash6 and r2.category = r.category and r2.created_at > ? group by time_band order by count(*) desc limit 1) as time_band,
+              (select min(r3.area_label) from reports r3 where r3.geohash6 = r.geohash6 and r3.created_at > ? and r3.area_label is not null
+                 group by lower(trim(r3.area_label)) having count(distinct r3.reporter_id) >= 3 order by count(distinct r3.reporter_id) desc limit 1) as area_label
          from reports r
         where geohash6 in (${cells.map(() => "?").join(",")}) and created_at > ?
+          and not exists (select 1 from area_moderation mo where mo.geohash6 = r.geohash6 and mo.category = r.category and mo.status = 'hidden')
         group by geohash6, category
        having count(distinct reporter_id) >= 3
         order by reporters desc`,
-      [...cells, since],
+      [since, since, ...cells, since],
     );
     return json({ areas: rows });
   }

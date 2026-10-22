@@ -4,18 +4,8 @@ import { IconSpark } from "@/components/icons";
 import { Button, Card, Chip, ErrorText, Field, H1, Note, Screen, Section, Sub, TopBar } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
 import { api } from "@/lib/api";
+import { DIRECTORY_CHECKED, HELPLINES } from "@/lib/support-directory";
 import { c, f } from "@/lib/theme";
-
-// Government helplines, as listed by NCW and the services themselves.
-const LINES = [
-  { n: "112", name: "Emergency (police, ambulance, fire)", when: "Danger right now" },
-  { n: "181", name: "Women Helpline", when: "Advice, shelter, One Stop Centre referral" },
-  { n: "14490", name: "NCW 24×7 Women Helpline", when: "National Commission for Women" },
-  { n: "1930", name: "Cyber Crime Helpline", when: "Online harassment, leaked photos, fraud" },
-  { n: "15100", name: "NALSA Legal Aid", when: "Free legal help" },
-  { n: "14416", name: "Tele-MANAS", when: "Free 24×7 mental health support" },
-  { n: "1098", name: "Childline", when: "If the person is under 18" },
-];
 
 const PATHS: Record<string, { title: string; body: string }[]> = {
   now: [
@@ -39,17 +29,18 @@ export default function Support() {
   const { lang } = useApp();
   const [path, setPath] = useState<keyof typeof PATHS>("now");
   const [q, setQ] = useState("");
-  const [answer, setAnswer] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<{ body: string; source: "ai" | "curated" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [showSources, setShowSources] = useState(false);
 
   const ask = async () => {
     setErr("");
     if (!q.trim()) return;
     setBusy(true);
     try {
-      const data = await api<{ body: string }>("POST", "guide", { question: q.trim(), language: lang }, { timeoutMs: 40000 });
-      setAnswer(data.body);
+      const data = await api<{ body: string; source: "ai" | "curated" }>("POST", "guide", { question: q.trim(), language: lang }, { timeoutMs: 40000 });
+      setAnswer(data);
     } catch {
       setErr("The guide is unavailable right now. The helplines above are always open.");
     } finally {
@@ -79,37 +70,59 @@ export default function Support() {
 
       <Section title="Helplines" hint="free · tap to call" />
       <Card>
-        {LINES.map((l, i) => (
+        {HELPLINES.map((l, i) => (
           <Pressable
-            key={l.n}
+            key={l.number}
             accessibilityRole="button"
-            accessibilityLabel={`Call ${l.name}, ${l.n}`}
-            onPress={() => Linking.openURL(`tel:${l.n}`)}
+            accessibilityLabel={`Call ${l.name}, ${l.number}`}
+            onPress={() => Linking.openURL(`tel:${l.number}`)}
             style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderTopWidth: i ? 1.5 : 0, borderTopColor: c.faint }}
           >
-            <Text style={{ fontFamily: f.display, fontSize: 20, color: l.n === "112" ? c.sosDeep : c.ink, width: 64 }}>{l.n}</Text>
+            <Text style={{ fontFamily: f.display, fontSize: 20, color: l.number === "112" ? c.sosDeep : c.ink, width: 64 }}>{l.number}</Text>
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: f.bodyBold, fontSize: 14, color: c.ink }}>{l.name}</Text>
-              <Text style={{ fontFamily: f.body, fontSize: 12.5, color: c.muted }}>{l.when}</Text>
+              <Text style={{ fontFamily: f.body, fontSize: 12.5, color: c.muted }}>
+                {l.purpose} · {l.hours}
+              </Text>
             </View>
             <Text style={{ fontFamily: f.bodyBold, color: c.ink }}>Call</Text>
           </Pressable>
         ))}
+        <Pressable accessibilityRole="link" onPress={() => setShowSources((v) => !v)} style={{ paddingTop: 8 }}>
+          <Text style={{ fontFamily: f.body, fontSize: 12, color: c.muted }}>
+            Checked {new Date(DIRECTORY_CHECKED).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} against official sources. {showSources ? "Hide sources" : "Show sources"}
+          </Text>
+        </Pressable>
+        {showSources &&
+          HELPLINES.map((l) => (
+            <Pressable key={`src-${l.number}`} accessibilityRole="link" onPress={() => Linking.openURL(l.sourceUrl)}>
+              <Text style={{ fontFamily: f.body, fontSize: 12, color: c.ink, textDecorationLine: "underline", marginTop: 4 }}>
+                {l.number}: {l.source}
+              </Text>
+            </Pressable>
+          ))}
       </Card>
 
       <Section title="Ask in your language" hint="English · हिंदी · বাংলা" />
       <Card bg={c.lilac}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
           <IconSpark />
-          <Text style={{ fontFamily: f.bodyBold, fontSize: 11, letterSpacing: 1, color: c.ink }}>SAAHI GUIDE · GENERAL INFORMATION</Text>
+          <Text style={{ fontFamily: f.bodyBold, fontSize: 11, letterSpacing: 1, color: c.ink }}>SAAHI GUIDE · AI · GENERAL INFORMATION</Text>
         </View>
         <Field label="Your question" value={q} onChangeText={setQ} multiline placeholder="অভিযোগ করতে কি থানায় যেতেই হবে?" />
         <View style={{ height: 10 }} />
         <Button label="Ask" onPress={ask} loading={busy} disabled={!q.trim()} />
         <ErrorText>{err}</ErrorText>
-        {answer && <Text style={{ fontFamily: f.body, fontSize: 14, color: c.ink, marginTop: 12, lineHeight: 20 }}>{answer}</Text>}
+        {answer && (
+          <View style={{ marginTop: 12 }}>
+            <Text testID="guide-source" style={{ fontFamily: f.bodyBold, fontSize: 11, letterSpacing: 0.5, color: c.ink }}>
+              {answer.source === "ai" ? "WRITTEN BY AI · CAN BE WRONG · CHECK WITH A HELPLINE" : "STANDARD ANSWER WRITTEN BY SAAHI (AI UNAVAILABLE)"}
+            </Text>
+            <Text style={{ fontFamily: f.body, fontSize: 14, color: c.ink, marginTop: 6, lineHeight: 20 }}>{answer.body}</Text>
+          </View>
+        )}
       </Card>
-      <Note>The guide gives general information, not legal or medical advice. It never decides whether something "counts". For your situation, call 15100 for free legal aid or 14416 to talk to a counsellor.</Note>
+      <Note>The guide is an AI model with fixed safety rules. When AI is switched on, your question is sent to Anthropic to answer it; SAAHI does not save it. It gives general information, not legal or medical advice. It never decides whether something "counts". For your situation, call 15100 for free legal aid or 14416 to talk to a counsellor.</Note>
     </Screen>
   );
 }

@@ -207,6 +207,37 @@ export const MIGRATIONS: Migration[] = [
       `create index if not exists audit_owner on audit_log(owner_id, at)`,
     ],
   },
+  {
+    version: 3,
+    name: "Escalation Graph corrections with history; summary basis; community moderation",
+    steps: [
+      { addColumn: ["entries", "updated_at", "text"] },
+      { addColumn: ["entries", "revision", "integer not null default 1"] },
+      { addColumn: ["entries", "source_ref", "text"] },
+      `create table if not exists entry_revisions (
+        id integer primary key autoincrement,
+        entry_id text not null,
+        owner_id text not null,
+        revision integer not null,
+        kind text not null, occurred_at text not null,
+        channel text, handle text, note text, source_ref text,
+        reason text,
+        replaced_at text not null
+      )`,
+      `create index if not exists entry_revisions_entry on entry_revisions(entry_id, revision)`,
+      { addColumn: ["summaries", "basis_count", "integer"] },
+      { addColumn: ["summaries", "basis_latest", "text"] },
+      `create table if not exists report_flags (
+        geohash6 text not null, category text not null, flagger_id text not null, reason text not null, created_at text not null,
+        primary key (geohash6, category, flagger_id)
+      )`,
+      `create table if not exists area_moderation (
+        geohash6 text not null, category text not null, status text not null, note text, updated_at text not null,
+        primary key (geohash6, category)
+      )`,
+      `create index if not exists reports_reporter on reports(reporter_id, geohash6, category, created_at)`,
+    ],
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

@@ -61,7 +61,7 @@ section("Schema");
 const h = await call("GET", "health");
 check("health reports the latest schema version", h.ok === true && h.schema >= 2, JSON.stringify(h));
 const mig = await sql("select version from schema_migrations order by version");
-check("migrations recorded once each", mig.map((r) => Number(r.version)).join(",") === "1,2", JSON.stringify(mig));
+check("migrations recorded once each", mig.map((r) => Number(r.version)).join(",") === Array.from({ length: h.schema }, (_, i) => i + 1).join(","), JSON.stringify(mig));
 
 section("SOS idempotency and duplicate prevention");
 const r1 = ref();

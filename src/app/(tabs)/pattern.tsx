@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Share, Text, TextInput, View } from "react-native";
+import { Pressable, Share, Text, TextInput, View } from "react-native";
 import { IconSpark } from "@/components/icons";
 import { PatternChart } from "@/components/PatternChart";
 import { Button, Card, Chip, ErrorText, Field, H1, Note, Screen, Section, Sub, TopBar, s as ui } from "@/components/ui";
@@ -10,6 +10,7 @@ import { api, type PatternEntry } from "@/lib/api";
 import { c, f, radius } from "@/lib/theme";
 
 type Thread = { id: string; title: string };
+type Summary = { id?: string; body: string; source: string; edited?: number; stale?: boolean | null; basis_count?: number | null; basis_latest?: string | null; created_at?: string };
 
 export default function Pattern() {
   const router = useRouter();
@@ -17,7 +18,7 @@ export default function Pattern() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [entries, setEntries] = useState<PatternEntry[]>([]);
-  const [summary, setSummary] = useState<{ id?: string; body: string; source: string } | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -33,7 +34,7 @@ export default function Pattern() {
       setSummary(null);
       return;
     }
-    const r = await api<{ entries: PatternEntry[]; summary: { id: string; body: string; source: string } | null }>("GET", `threads/${id}`);
+    const r = await api<{ entries: PatternEntry[]; summary: Summary | null }>("GET", `threads/${id}`);
     setEntries(r.entries);
     setSummary(r.summary);
   }, [active]);
@@ -60,8 +61,8 @@ export default function Pattern() {
     setErr("");
     setBusy(true);
     try {
-      const data = await api<{ body: string; source: string }>("POST", `threads/${active}/summary`, undefined, { timeoutMs: 40000 });
-      setSummary({ body: data.body, source: data.source });
+      const data = await api<Summary>("POST", `threads/${active}/summary`, undefined, { timeoutMs: 40000 });
+      setSummary({ ...data, created_at: new Date().toISOString() });
     } catch {
       setErr("Couldn't draft a summary right now. Your entries are safe; try again in a minute.");
     } finally {
@@ -73,6 +74,7 @@ export default function Pattern() {
     if (!summary || !active || !session) return;
     try {
       await api("PUT", `threads/${active}/summary`, { body: summary.body, source: summary.source });
+      setSummary({ ...summary, edited: 1 });
       setEditing(false);
     } catch (e) {
       setErr((e as Error).message);
@@ -83,8 +85,14 @@ export default function Pattern() {
     const title = threads.find((t) => t.id === active)?.title ?? "Pattern";
     const lines = [...entries]
       .reverse()
-      .map((e) => `${new Date(e.occurred_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} · ${KIND[e.kind].label}${e.channel ? ` · ${e.channel}` : ""}${e.handle ? ` · ${e.handle}` : ""}${e.note ? `\n   ${e.note}` : ""}`);
-    const text = [`${title} (timeline from SAAHI)`, "", ...lines, "", summary ? `Summary (drafted with AI, reviewed by me):\n${summary.body}` : ""].join("\n");
+      .map(
+        (e) =>
+          `${new Date(e.occurred_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} · ${KIND[e.kind].label}${e.channel ? ` · ${e.channel}` : ""}${e.handle ? ` · ${e.handle}` : ""}${e.note ? `\n   ${e.note}` : ""}${e.source_ref ? `\n   Proof: ${e.source_ref}` : ""}${(e.revision ?? 1) > 1 ? `\n   (Corrected by me; earlier version kept in SAAHI)` : ""}`,
+      );
+    const label = !summary
+      ? ""
+      : `Summary (${summary.source === "ai" ? "drafted with AI" : "counted by SAAHI"} from ${summary.basis_count ?? "my"} entries${summary.edited ? ", edited by me" : ""}${summary.stale ? "; entries have changed since, so it may be out of date" : ""}):`;
+    const text = [`${title} (timeline from SAAHI)`, "", ...lines, "", summary ? `${label}\n${summary.body}` : ""].join("\n");
     await Share.share({ message: text });
   };
 
@@ -151,8 +159,20 @@ export default function Pattern() {
               <IconSpark />
               <Text style={{ fontFamily: f.bodyBold, fontSize: 11, letterSpacing: 1, color: c.ink }}>
                 {summary ? (summary.source === "ai" ? "DRAFTED WITH AI FROM YOUR ENTRIES" : "COUNTED FROM YOUR ENTRIES") : "NO SUMMARY YET"}
+                {summary?.edited ? " · EDITED BY YOU" : ""}
               </Text>
             </View>
+            {summary?.basis_count != null && (
+              <Text testID="summary-basis" style={{ fontFamily: f.body, fontSize: 12, color: c.ink, marginBottom: 6 }}>
+                Based on {summary.basis_count} {summary.basis_count === 1 ? "entry" : "entries"}
+                {summary.basis_latest ? `, as of ${new Date(summary.basis_latest).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}.
+              </Text>
+            )}
+            {summary?.stale && (
+              <Text testID="summary-stale" style={{ fontFamily: f.bodyBold, fontSize: 12.5, color: c.sosDeep, marginBottom: 6 }}>
+                You've added or corrected entries since this summary. Redraft it before you share it.
+              </Text>
+            )}
             {summary ? (
               editing ? (
                 <TextInput
@@ -181,10 +201,15 @@ export default function Pattern() {
             <Button tone="ghost" label="Talk to a counsellor first" onPress={() => router.push("/support")} />
           </View>
 
-          <Section title="Timeline" hint={`${entries.length} entries`} />
+          <Section title="Timeline" hint={`${entries.length} entries · tap one to correct it`} />
           <View style={{ borderLeftWidth: 2, borderLeftColor: c.ink, marginLeft: 8, paddingLeft: 18, gap: 14 }}>
             {entries.map((e) => (
-              <View key={e.id}>
+              <Pressable
+                key={e.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Correct entry: ${KIND[e.kind].label}`}
+                onPress={() => router.push({ pathname: "/entry", params: { thread: active ?? "", edit: e.id } })}
+              >
                 <View style={{ position: "absolute", left: -27, top: 2, width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: c.ink, backgroundColor: KIND[e.kind].color }} />
                 <Text style={{ fontFamily: f.mono, fontSize: 11, color: c.muted }}>
                   {new Date(e.occurred_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()}
@@ -195,7 +220,8 @@ export default function Pattern() {
                 </Text>
                 {e.note ? <Text style={{ fontFamily: f.body, fontSize: 13, color: c.muted, lineHeight: 18 }}>{e.note}</Text> : null}
                 {e.channel ? <Text style={ui.hint}>{e.channel}</Text> : null}
-              </View>
+                {(e.revision ?? 1) > 1 ? <Text style={ui.hint}>Corrected · earlier version kept</Text> : null}
+              </Pressable>
             ))}
             {!entries.length && <Text style={ui.hint}>No entries yet.</Text>}
           </View>

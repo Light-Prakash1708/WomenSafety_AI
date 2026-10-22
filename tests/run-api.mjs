@@ -36,7 +36,7 @@ if (!up) {
   process.exit(1);
 }
 
-const files = process.argv.slice(2).length ? process.argv.slice(2) : ["tests/api.test.mjs", "tests/safety.test.mjs"];
+const files = process.argv.slice(2).length ? process.argv.slice(2) : ["tests/api.test.mjs", "tests/safety.test.mjs", "tests/records.test.mjs"];
 let failed = false;
 for (const f of files) {
   const code = await new Promise((res) => {
