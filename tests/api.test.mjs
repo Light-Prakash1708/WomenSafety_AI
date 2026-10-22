@@ -89,7 +89,7 @@ const after = await call("GET", `alerts/${alertId}`, null, AT);
 const maRow = after.recipients.find((r) => r.name === "Ma");
 check("she sees Ma 'acknowledged' with message", maRow.status === "acknowledged" && maRow.message === "Coming in 5 min");
 await call("POST", `alerts/${alertId}/sms-sent`, null, AT);
-check("texts marked sent for the rest", (await call("GET", `alerts/${alertId}`, null, AT)).recipients.find((r) => r.name === "Riya Sen").status === "sent");
+check("Android 'unknown' from her Messages app is recorded as opened-in-Messages, never 'sent'", (await call("GET", `alerts/${alertId}`, null, AT)).recipients.find((r) => r.name === "Riya Sen").status === "device_compose");
 
 // public tracking page API
 const pub = async (method, body, t = token) => {
@@ -102,7 +102,7 @@ check("tracking link shows live location and battery", p.j.location && Math.abs(
 check("tracking link lists recipients", p.j.recipients.length === 2);
 const riya = p.j.recipients.find((r) => r.name === "Riya");
 await pub("POST", { action: "open", recipient_id: riya.id });
-check("opening the link doesn't downgrade a sent text", (await call("GET", `alerts/${alertId}`, null, AT)).recipients.find((r) => r.name === "Riya Sen").status === "opened");
+check("opening the link moves the recipient forward to link_opened", (await call("GET", `alerts/${alertId}`, null, AT)).recipients.find((r) => r.name === "Riya Sen").status === "link_opened");
 await pub("POST", { action: "ack", recipient_id: riya.id, message: "On my way, 10 min" });
 check("helper's 'I'm on it' reaches her", (await call("GET", `alerts/${alertId}`, null, AT)).recipients.find((r) => r.name === "Riya Sen").status === "acknowledged");
 check("malformed token rejected", (await pub("GET", null, "zz")).status === 400);
@@ -188,16 +188,22 @@ check("stranger can't check in for her", (await call("POST", `journeys/${jr.jour
 const { createClient } = await import("@libsql/client");
 const dbc = createClient({ url: `file:${process.env.TEST_DB}` });
 await dbc.execute({ sql: "update journeys set next_checkin_at = ? where id = ?", args: [new Date(Date.now() - 4 * 60000).toISOString(), jr.journey.id] });
-const wd = await (await fetch(`${BASE}/api/cron/watchdog`)).json();
+const runCron = async () => {
+  await dbc.execute("delete from meta where key = 'cron_last_run'");
+  return (await fetch(`${BASE}/api/cron/watchdog`)).json();
+};
+const wd = await runCron();
 check("watchdog opens an alert for the overdue journey", wd.opened >= 1, JSON.stringify(wd));
 const jrow = (await dbc.execute({ sql: "select status, alert_id from journeys where id = ?", args: [jr.journey.id] })).rows[0];
 check("journey marked missed and linked to the alert", jrow.status === "missed" && !!jrow.alert_id);
 const wa = await call("GET", `alerts/${jrow.alert_id}`, null, AT);
 check("watchdog alert uses her last journey location and whole circle", wa.alert.trigger === "watchdog" && wa.alert.last_lat === 22.52 && wa.recipients.length === 2);
 check("guardian sees the watchdog alert", (await call("GET", "guardian/alerts", null, MT)).alerts.some((x) => x.id === jrow.alert_id));
-check("next sweep doesn't double-alert", (await (await fetch(`${BASE}/api/cron/watchdog`)).json()).opened === 0);
+const wd2 = await runCron();
+const wdCount = (await dbc.execute({ sql: "select count(*) as n from alerts where owner_id = ? and trigger = 'watchdog'", args: [A.user.id] })).rows[0].n;
+check("next sweep doesn't double-alert (exactly one watchdog alert)", wd2.opened === 0 && Number(wdCount) === 1, JSON.stringify({ wd2, wdCount }));
 const fresh = await call("POST", "journeys", { destination: "Home", interval_minutes: 5 }, AT);
-await fetch(`${BASE}/api/cron/watchdog`);
+await runCron();
 check("on-time journey left alone", (await call("GET", "journeys/active", null, AT)).journey?.id === fresh.journey.id);
 await call("POST", `journeys/${fresh.journey.id}/end`, { status: "arrived" }, AT);
 check("arriving ends the journey", (await call("GET", "journeys/active", null, AT)).journey === null);

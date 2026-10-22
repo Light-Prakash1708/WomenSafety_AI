@@ -12,6 +12,8 @@ export function inviteMessage(ownerName: string, code: string) {
   return `${first} added you to their SAAHI safety circle. If they send an SOS, you'll get their live location. To get alerts in the app too, open ${SITE_URL}/join?code=${code} or enter the guardian code ${code} in SAAHI.`;
 }
 
+const inviteExpired = (ct: Contact) => Boolean(ct.invite_expires_at && +new Date(ct.invite_expires_at) < Date.now());
+
 export function ContactEditor() {
   const { contacts, setContacts, profile } = useApp();
   const [name, setName] = useState("");
@@ -47,6 +49,16 @@ export function ContactEditor() {
   const remove = async (id: string) => {
     try {
       const r = await api<{ contacts: Contact[] }>("DELETE", `contacts/${id}`);
+      setContacts(r.contacts);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  // New code: the old one stops working, and anyone who joined with it loses access at once.
+  const rotate = async (id: string) => {
+    try {
+      const r = await api<{ contacts: Contact[] }>("POST", `contacts/${id}/unlink`);
       setContacts(r.contacts);
     } catch (e) {
       setErr((e as Error).message);
@@ -89,11 +101,15 @@ export function ContactEditor() {
             <View style={{ marginTop: 12, gap: 8 }}>
               <Text style={{ fontFamily: f.body, fontSize: 13, color: c.ink, lineHeight: 18 }}>
                 {ct.linked_user_id
-                  ? `${ct.name} gets your alerts in the SAAHI app as well as by text.`
-                  : `Guardian code ${ct.invite_code}. Send it so ${ct.name} also gets your alerts in the SAAHI app.`}
+                  ? `Joined as "${ct.guardian_name || "someone"}"${ct.linked_at ? ` on ${new Date(ct.linked_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}. They see your alerts in the SAAHI app as well as by text. If that isn't ${ct.name}, revoke it.`
+                  : inviteExpired(ct)
+                    ? `The guardian code for ${ct.name} has expired. Make a new one to invite them.`
+                    : `Guardian code ${ct.invite_code}, valid until ${ct.invite_expires_at ? new Date(ct.invite_expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "used"}. Send it so ${ct.name} also gets your alerts in the SAAHI app.`}
               </Text>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                {!ct.linked_user_id && <Button label="Send invite" onPress={() => invite(ct)} style={{ flexGrow: 1 }} />}
+                {!ct.linked_user_id && !inviteExpired(ct) && <Button label="Send invite" onPress={() => invite(ct)} style={{ flexGrow: 1 }} />}
+                {!ct.linked_user_id && inviteExpired(ct) && <Button label="New code" onPress={() => rotate(ct.id)} style={{ flexGrow: 1 }} />}
+                {ct.linked_user_id && <Button tone="ghost" label="Revoke app access" onPress={() => rotate(ct.id)} style={{ flexGrow: 1 }} />}
                 <Button tone="ghost" label="Remove" onPress={() => remove(ct.id)} style={{ flexGrow: 1 }} />
               </View>
             </View>

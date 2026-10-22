@@ -1,12 +1,36 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { Button, Card, ErrorText, Field, H1, Note, Screen, Section, Sub, Toggle } from "@/components/ui";
 import { useApp } from "@/lib/app-state";
 import { isWeb } from "@/lib/layout";
 import { setPins } from "@/lib/pins";
 import { usePrefs } from "@/lib/prefs";
-import { api } from "@/lib/api";
+import { api, setToken } from "@/lib/api";
+import { c, f } from "@/lib/theme";
+
+type AuditEvent = { action: string; at: string; actor: string };
+const ACTIONS: Record<string, string> = {
+  "alert.created": "SOS started",
+  "alert.cancelled": "SOS cancelled",
+  "alert.cancelled_before_created": "SOS cancelled before it reached the server",
+  "alert.duress": "Duress PIN used",
+  "alert.expired": "SOS ended after 24 h without contact",
+  "alert.link_rotated": "Tracking link replaced",
+  "alert.ack_by_guardian": "Said they're on it",
+  "alert.ack_by_link": "Someone with your link said they're on it",
+  "journey.missed": "Missed a SafeWalk check-in; circle alerted",
+  "guardian.joined": "Joined your circle in the app",
+  "guardian.revoked": "App access revoked",
+  "guardian.removed": "Guardian removed",
+  "invite.rotated": "New guardian code made",
+  "auth.logout_all": "Signed out on every device",
+  "auth.recover": "Password reset with recovery code",
+  "vault.saved": "Saved to vault",
+  "vault.viewed": "Vault item opened",
+  "vault.deleted": "Vault item deleted",
+  "vault.exported": "Vault exported",
+};
 
 export default function Settings() {
   const router = useRouter();
@@ -19,6 +43,28 @@ export default function Settings() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [events, setEvents] = useState<AuditEvent[] | null>(null);
+
+  const loadActivity = async () => {
+    setErr("");
+    try {
+      const r = await api<{ events: AuditEvent[] }>("GET", "audit");
+      setEvents(r.events.slice(0, 30));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  const signOutEverywhere = async () => {
+    setErr("");
+    try {
+      const r = await api<{ token: string }>("POST", "auth/logout-all");
+      await setToken(r.token);
+      setMsg("Signed out on every other device. This one stays signed in.");
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
 
   const saveProfile = async () => {
     setErr("");
@@ -85,8 +131,27 @@ export default function Settings() {
       </View>
       <ErrorText>{err}</ErrorText>
 
+      <Section title="Activity" hint="Who did what with your alerts, circle and vault" />
+      {events === null ? (
+        <Button tone="ghost" label="Show recent activity" onPress={loadActivity} />
+      ) : (
+        <Card>
+          {events.length === 0 && <Sub>Nothing yet.</Sub>}
+          {events.map((ev, i) => (
+            <View key={i} style={{ paddingVertical: 6, borderBottomWidth: i === events.length - 1 ? 0 : 1, borderColor: "rgba(26,20,48,0.12)" }}>
+              <Text style={{ fontFamily: f.bodyBold, fontSize: 13.5, color: c.ink }}>
+                {ev.actor === "you" ? "" : `${ev.actor}: `}
+                {ACTIONS[ev.action] ?? ev.action}
+              </Text>
+              <Text style={{ fontFamily: f.body, fontSize: 12, color: c.ink, opacity: 0.7 }}>{new Date(ev.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</Text>
+            </View>
+          ))}
+        </Card>
+      )}
+
       <Section title="Account" hint={session?.user.email} />
       <View style={{ gap: 10 }}>
+        <Button tone="ghost" label="Sign out on every other device" onPress={signOutEverywhere} />
         <Button tone="ghost" label="Enter a guardian code" onPress={() => router.push("/join")} />
         <Button tone="ghost" label="Sign out" onPress={async () => { await signOut(); router.replace("/"); }} />
         {!confirmDelete ? (

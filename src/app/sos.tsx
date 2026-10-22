@@ -1,28 +1,27 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { IconMic, IconPeople, IconPin, IconSignal } from "@/components/icons";
 import { PinPad } from "@/components/PinPad";
 import { useApp } from "@/lib/app-state";
 import { isWeb } from "@/lib/layout";
 import { useSos } from "@/lib/sos";
-import type { Recipient } from "@/lib/api";
+import { ageText, recipientLabel } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
-const STATUS: Record<Recipient["status"], { label: string; tone: "wait" | "sent" | "ack" | "fail" }> = {
-  queued: { label: "Queued", tone: "wait" },
-  sent: { label: "Sent", tone: "sent" },
-  opened: { label: "Opened link", tone: "sent" },
-  acknowledged: { label: "On it", tone: "ack" },
-  failed: { label: "Not delivered", tone: "fail" },
-};
+const STALE_SECONDS = 120;
 
 export default function SosScreen() {
   const router = useRouter();
   const { t, contacts, profile } = useApp();
   const sos = useSos();
   const [pinOpen, setPinOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, []);
   const [ended, setEnded] = useState<null | "cancel" | "duress">(null);
   const [pulse] = useState(() => new Animated.Value(0));
 
@@ -68,6 +67,8 @@ export default function SosScreen() {
   }
 
   const loc = sos.location;
+  const fixAge = loc ? Math.max(0, Math.round((now - (loc.timestamp || now)) / 1000)) : null;
+  const staleFix = fixAge != null && fixAge > STALE_SECONDS;
   const acked = sos.recipients.filter((r) => r.status === "acknowledged").length;
   const mm = String(Math.floor(sos.recordingSecs / 60)).padStart(2, "0");
   const ss = String(sos.recordingSecs % 60).padStart(2, "0");
@@ -107,13 +108,26 @@ export default function SosScreen() {
         </View>
         <Text style={st.title}>{sos.phase === "duress" ? "Still sharing quietly" : acked ? `${acked} ${acked === 1 ? "person is" : "people are"} coming` : t("helpOnWay")}</Text>
         <Text style={st.sub}>
-          {loc
-            ? `Live location ±${Math.round(loc.coords.accuracy ?? 0)} m · ${sos.backgroundSharing ? "keeps sharing when locked" : "keep SAAHI open to keep sharing"}`
-            : "Finding your location…"}
+          {sos.locationDenied
+            ? "Location is off for SAAHI, so your circle can't see where you are. Turn it on in Settings, or tell them where you are."
+            : loc
+              ? `${staleFix ? `Last location ${ageText(fixAge)}` : "Live location"} ±${Math.round(loc.coords.accuracy ?? 0)} m · ${sos.backgroundSharing ? "keeps sharing when locked" : "keep SAAHI open to keep sharing"}`
+              : "Finding your location…"}
         </Text>
 
         <View style={{ gap: 8 }}>
-          <Row icon={<IconPin color={c.nightFg} />} title="Location" sub={loc ? `${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)}` : "Waiting for GPS"} status={loc ? { label: "Locked", tone: "ack" } : { label: "Searching", tone: "wait" }} />
+          <Row
+            icon={<IconPin color={c.nightFg} />}
+            title="Location"
+            sub={
+              sos.locationDenied
+                ? "Permission refused. Helpers won't see a map."
+                : loc
+                  ? `${loc.coords.latitude.toFixed(4)}, ${loc.coords.longitude.toFixed(4)} · ${ageText(fixAge)}`
+                  : "Waiting for GPS"
+            }
+            status={sos.locationDenied ? { label: "Off", tone: "fail" } : !loc ? { label: "Searching", tone: "wait" } : staleFix ? { label: "Old fix", tone: "sent" } : { label: "Current", tone: "ack" }}
+          />
           <Row
             icon={<IconSignal size={18} color={c.nightFg} />}
             title="Live link"
@@ -136,15 +150,18 @@ export default function SosScreen() {
               }
             />
           </Pressable>
-          {sos.recipients.map((r) => (
-            <Row
-              key={r.id}
-              icon={<Text style={{ fontFamily: f.bodyBold, color: c.nightFg }}>{r.name.slice(0, 2)}</Text>}
-              title={r.name}
-              sub={r.message || (r.channel === "push" ? "via SAAHI app" : "via text message")}
-              status={STATUS[r.status]}
-            />
-          ))}
+          {sos.recipients.map((r) => {
+            const s = recipientLabel(r.status);
+            return (
+              <Row
+                key={r.id}
+                icon={<Text style={{ fontFamily: f.bodyBold, color: c.nightFg }}>{r.name.slice(0, 2)}</Text>}
+                title={r.name}
+                sub={r.message ? `"${r.message}"` : s.detail}
+                status={s}
+              />
+            );
+          })}
           <Row icon={<Text style={{ fontFamily: f.bodyBold, color: c.nightFg }}>112</Text>} title="112 India" sub="Police, ambulance and fire. Tap the button below to call." status={{ label: "Ready", tone: "wait" }} />
         </View>
 
@@ -172,7 +189,23 @@ export default function SosScreen() {
         </Pressable>
       </ScrollView>
 
-      {pinOpen && (
+      {pinOpen && sos.needsPassword && (
+        <PasswordGate
+          onClose={() => setPinOpen(false)}
+          onSubmit={async (pw) => {
+            const r = await sos.cancelWithPassword(pw);
+            if (r === "cancel") {
+              setPinOpen(false);
+              setEnded("cancel");
+              return null;
+            }
+            if (r === "wrong") return "That password isn't right. Your alert is still active.";
+            if (r === "locked") return "Too many tries. Your alert stays on. Wait 15 minutes, or call 112 if you need help.";
+            return "Can't check your password without internet. Your alert stays on.";
+          }}
+        />
+      )}
+      {pinOpen && !sos.needsPassword && (
         <PinPad
           title={t("enterPin")}
           onClose={() => setPinOpen(false)}
@@ -186,6 +219,51 @@ export default function SosScreen() {
         />
       )}
     </SafeAreaView>
+  );
+}
+
+/** This device has no cancel PIN (new phone or browser), so cancelling needs her account password. */
+function PasswordGate({ onSubmit, onClose }: { onSubmit: (pw: string) => Promise<string | null>; onClose: () => void }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (!pw || busy) return;
+    setBusy(true);
+    const e = await onSubmit(pw);
+    setBusy(false);
+    if (e) {
+      setErr(e);
+      setPw("");
+    }
+  };
+  return (
+    <View style={st.gate}>
+      <View style={{ width: "100%", maxWidth: 420 }}>
+        <Text style={[st.title, { fontSize: 22 }]}>Enter your password</Text>
+        <Text style={[st.sub, { marginBottom: 14 }]}>Your PINs are set on another device. Use your SAAHI password to stop the alert here, or set PINs on this device in Settings afterwards.</Text>
+        <TextInput
+          testID="sos-password"
+          value={pw}
+          onChangeText={setPw}
+          onSubmitEditing={go}
+          secureTextEntry
+          autoFocus
+          autoCapitalize="none"
+          placeholder="Password"
+          placeholderTextColor={c.nightMuted}
+          style={st.input}
+          accessibilityLabel="Password"
+        />
+        <Text style={st.err}>{err}</Text>
+        <Pressable style={[st.btn, st.safe, busy && { opacity: 0.6 }]} onPress={go} accessibilityRole="button">
+          <Text style={[st.btnTxt, { color: "#06210F" }]}>{busy ? "Checking…" : "Stop alert"}</Text>
+        </Pressable>
+        <Pressable onPress={onClose} style={{ alignItems: "center", marginTop: 18 }}>
+          <Text style={{ fontFamily: f.bodySemi, color: c.nightMuted }}>Back to alert</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -272,4 +350,7 @@ const st = StyleSheet.create({
   sendRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },
   chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "rgba(242,238,255,0.12)" },
   chipTxt: { fontFamily: f.bodyBold, fontSize: 12.5, color: c.nightFg },
+  gate: { ...StyleSheet.absoluteFill, backgroundColor: c.night, alignItems: "center", justifyContent: "center", padding: 24 },
+  input: { backgroundColor: c.night2, borderRadius: 14, borderWidth: 1.5, borderColor: "rgba(242,238,255,0.2)", color: c.nightFg, fontFamily: f.body, fontSize: 16, paddingHorizontal: 14, paddingVertical: 13 },
+  err: { fontFamily: f.bodySemi, color: "#FF8A82", fontSize: 13, minHeight: 22, marginTop: 10, marginBottom: 6 },
 });

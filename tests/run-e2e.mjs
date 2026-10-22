@@ -17,7 +17,7 @@ for (const vp of viewports) {
   const port = 3900 + Math.floor(Math.random() * 90);
   const app = `http://localhost:${port}`;
   const server = spawn(process.execPath, [path.resolve("node_modules/tsx/dist/cli.mjs"), "scripts/dev-server.ts"], {
-    env: { ...process.env, PORT: String(port), TURSO_DATABASE_URL: `file:${db}`, TURSO_AUTH_TOKEN: "", JWT_SECRET: "e2e-secret", ANTHROPIC_API_KEY: "", SAAHI_DISABLE_PUSH: "1" },
+    env: { ...process.env, PORT: String(port), TURSO_DATABASE_URL: `file:${db}`, TURSO_AUTH_TOKEN: "", JWT_SECRET: "e2e-secret", ANTHROPIC_API_KEY: "", SAAHI_PUSH_MODE: "disabled" },
     stdio: "ignore",
   });
   let up = false;

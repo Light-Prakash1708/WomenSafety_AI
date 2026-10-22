@@ -24,6 +24,7 @@
   .map{border:2px solid var(--ink);border-radius:20px;overflow:hidden;box-shadow:3px 3px 0 var(--ink);aspect-ratio:4/3;background:var(--sage);max-width:100%}
   .map iframe{width:100%;height:100%;border:0;display:block}
   .meta{font-size:14px}
+  .meta.stale{font-weight:700;background:#FFE3E1;border:2px solid #1A1430;border-radius:12px;padding:10px 12px}
   .btn{display:block;width:100%;text-align:center;border:2px solid var(--ink);border-radius:14px;padding:14px;font:700 16px var(--body);box-shadow:3px 3px 0 var(--ink);
     background:var(--marigold);color:var(--ink);text-decoration:none;cursor:pointer}
   .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
@@ -84,7 +85,7 @@
 
   <section id="over" class="card ended" hidden>
     <h1 style="font-size:26px">This alert has ended</h1>
-    <p class="sub" style="color:var(--ink)">She marked herself safe. Her location is no longer shared.</p>
+    <p class="sub" style="color:var(--ink)" id="overWhy">She ended the alert. Her location is no longer shared.</p>
   </section>
 </main>
 
@@ -110,8 +111,22 @@
     var m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
     return m <= 0 ? "just now" : m === 1 ? "1 min ago" : m + " min ago";
   }
+  function agoSecs(s) {
+    if (s == null) return "";
+    return s < 45 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
+  }
+  // Each label says only what is known. Only "On it" means a person has seen it.
   function label(s) {
-    return { queued: "Not yet", sent: "Texted", opened: "Opened link", acknowledged: "On it", failed: "Not delivered" }[s] || s;
+    return {
+      queued: "Not sent yet",
+      failed: "Not delivered",
+      device_compose: "Text opened on her phone",
+      device_sent: "Texted from her phone",
+      provider_accepted: "App alert queued",
+      provider_delivered: "App alert sent",
+      link_opened: "Opened link",
+      acknowledged: "On it"
+    }[s] || "Not sent yet";
   }
   function post(body) {
     return fetch(api, { method: "POST", headers: headers(), body: JSON.stringify(Object.assign({ t: token }, body)) });
@@ -119,7 +134,13 @@
 
   function render(d) {
     $("loading").hidden = true;
-    if (d.status !== "active") { $("live").hidden = true; $("over").hidden = false; return; }
+    if (d.status !== "active") {
+      $("live").hidden = true; $("over").hidden = false;
+      $("overWhy").textContent = d.status === "expired"
+        ? "It ended automatically after 24 hours without any contact from her phone. If you're still worried, call her, then 112."
+        : "She ended the alert. Her location is no longer shared.";
+      return;
+    }
     $("live").hidden = false; $("over").hidden = true;
     $("title").textContent = d.name + " needs help";
     $("since").textContent = "Alert started " + new Date(d.started_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + (d.battery != null ? " · her battery " + Math.round(d.battery * 100) + "%" : "");
@@ -130,7 +151,12 @@
       if ($("map").getAttribute("src") !== src) $("map").setAttribute("src", src);
       $("mapsLink").href = "https://maps.google.com/?q=" + lat + "," + lng;
       $("mapBox").hidden = false; $("mapsLink").hidden = false;
-      $("locMeta").textContent = "Accurate to about " + Math.round(d.location.accuracy || 0) + " m · updated " + ago(d.location.at);
+      var age = d.location.age_seconds != null ? agoSecs(d.location.age_seconds) : ago(d.location.at);
+      $("locMeta").textContent = (d.location.stale
+        ? "Old location, taken " + age + ". She may have moved or lost signal. Call her; if you can't reach her, call 112."
+        : "Accurate to about " + Math.round(d.location.accuracy || 0) + " m · taken " + age)
+        + (d.phone_last_heard_at ? " · her phone last checked in " + ago(d.phone_last_heard_at) : "");
+      $("locMeta").className = "meta" + (d.location.stale ? " stale" : "");
     } else {
       $("mapBox").hidden = true; $("mapsLink").hidden = true;
       $("locMeta").textContent = "Waiting for her phone to send a location.";
@@ -165,7 +191,16 @@
     if (!/^[a-f0-9]{36}$/.test(token)) return showError("This link isn't complete. Ask her, or the person who sent it, for the full link.");
     fetch(api + "?t=" + token, { headers: headers() })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) { if (!res.ok) return showError(res.j.error || "Couldn't load this alert."); render(res.j); })
+      .then(function (res) {
+        if (res.ok) return render(res.j);
+        if (res.j && res.j.status === undefined && (res.j.error || "").indexOf("expired") >= 0) {
+          $("loading").hidden = true; $("live").hidden = true; $("over").hidden = false;
+          $("overWhy").textContent = "This link has expired. Her alert ended more than a week ago.";
+          clearInterval(timer);
+          return;
+        }
+        showError(res.j.error || "Couldn't load this alert.");
+      })
       .catch(function () { showError("No connection. If you can't load this, call her or 112."); });
   }
 
@@ -177,8 +212,8 @@
       .catch(function () { $("ackBtn").disabled = false; });
   };
 
+  var timer = setInterval(load, 10000);
   load();
-  setInterval(load, 10000);
 })();
 </script>
 </body>

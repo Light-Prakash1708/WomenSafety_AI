@@ -26,6 +26,14 @@ def sql(q):
     finally:
         con.close()
 
+def wait_sql(q, want, timeout=12):
+    end = time.time() + timeout
+    got = sql(q)
+    while got != want and time.time() < end:
+        time.sleep(0.4)
+        got = sql(q)
+    return got
+
 def api(method, path, body=None, token=None):
     req = urllib.request.Request(APP + "/api/" + path, method=method, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"content-type": "application/json", **({"authorization": "Bearer " + token} if token else {})})
@@ -268,13 +276,55 @@ with sync_playwright() as p:
     for d in "1234":
         page.get_by_role("button", name=d, exact=True).click()
     page.get_by_text("Tell your circle you're safe").wait_for()
-    check("real PIN ends the alert", sql(f"select status from alerts where id='{alert_id}'") == "cancelled")
+    check("real PIN ends the alert", wait_sql(f"select status from alerts where id='{alert_id}'", "cancelled") == "cancelled")
     hp.reload()
     hp.get_by_text("This alert has ended").wait_for(timeout=10000)
     check("tracking page shows ended, location hidden", hp.locator("#map").get_attribute("src") is None or hp.locator("#live").is_hidden())
     hp.screenshot(path=f"{SHOTS}/15-track-ended.png", full_page=True)
     page.get_by_text("Done", exact=True).click()
     page.get_by_text("Hi, Ananya").wait_for()
+
+    # ---- Same person on a new device (no PINs here): the running alert is found and needs her password ----
+    login = api("POST", "auth/login", {"email": email, "password": PASSWORD})
+    ref2 = "e2e-newdevice-" + stamp
+    a2 = api("POST", "alerts", {"client_ref": ref2, "trigger": "manual", "lat": 22.5181, "lng": 88.3531, "accuracy": 9}, login["token"])
+    check("an SOS started on her phone", a2.get("created") is True, str(a2)[:200])
+    retry = api("POST", "alerts", {"client_ref": ref2, "trigger": "manual"}, login["token"])
+    check("a retried SOS request returns the same alert", retry.get("alert", {}).get("id") == a2["alert"]["id"] and retry.get("created") is False)
+    ctx2 = browser.new_context(viewport=vp, device_scale_factor=2 if VP == "phone" else 1, is_mobile=VP == "phone", has_touch=VP == "phone",
+                               geolocation={"latitude": 22.5180, "longitude": 88.3530, "accuracy": 8}, permissions=["geolocation"], locale="en-IN")
+    p2 = ctx2.new_page()
+    p2.on("pageerror", lambda e: errors.append("DEVICE2 " + str(e)))
+    p2.goto(APP)
+    p2.get_by_placeholder("you@example.com").wait_for(timeout=30000)
+    p2.get_by_placeholder("you@example.com").fill(email)
+    p2.get_by_placeholder("At least 8 characters").fill(PASSWORD)
+    p2.get_by_role("button", name="Sign in").last.click()
+    p2.get_by_text("Hi, Ananya").wait_for(timeout=15000)
+    time.sleep(2)
+    lg = p2.get_by_test_id("rail-logo" if VP == "desktop" else "logo").bounding_box()
+    p2.mouse.move(lg["x"] + 10, lg["y"] + 10)
+    p2.mouse.down(); time.sleep(1.3); p2.mouse.up()
+    p2.get_by_text("Help is on the way").wait_for(timeout=10000)
+    check("new device picks up her running alert", True)
+    p2.get_by_text("I'm safe", exact=True).click()
+    p2.get_by_text("Enter your password").wait_for(timeout=5000)
+    check("no PINs on this device: cancelling asks for her password, not a PIN", p2.get_by_role("button", name="1", exact=True).count() == 0)
+    p2.get_by_test_id("sos-password").fill("not my password")
+    p2.get_by_text("Stop alert").click()
+    p2.get_by_text("That password isn't right").wait_for(timeout=8000)
+    check("wrong password keeps her signed in", p2.get_by_text("Enter your password").is_visible())
+    check("wrong password keeps the alert running", sql(f"select status from alerts where id='{a2['alert']['id']}'") == "active")
+    page.screenshot(path=f"{SHOTS}/15b-device1.png")
+    p2.screenshot(path=f"{SHOTS}/15c-new-device-password.png")
+    p2.get_by_test_id("sos-password").fill(PASSWORD)
+    p2.get_by_text("Stop alert").click()
+    try:
+        p2.get_by_text("Alert cancelled").wait_for(timeout=10000)
+    except Exception:
+        dump(p2, "device2-cancel"); raise
+    check("right password ends it from the new device", wait_sql(f"select status from alerts where id='{a2['alert']['id']}'", "cancelled") == "cancelled")
+    ctx2.close()
 
     # ---- Pattern ----
     page.get_by_role("tab", name=re.compile("Pattern")).click()

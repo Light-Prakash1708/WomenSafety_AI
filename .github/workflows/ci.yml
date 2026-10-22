@@ -20,6 +20,8 @@ jobs:
       - run: npx eslint src
       - name: API tests (local libSQL, no network)
         run: npm run test:api
+      - name: Migration upgrade + backup/restore drill
+        run: npm run test:db
       - name: Phone bundle builds
         run: npx expo export --platform android --output-dir /tmp/expo-export
       - name: Web build

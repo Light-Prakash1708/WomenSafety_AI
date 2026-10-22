@@ -24,11 +24,13 @@ export async function pushLocation(loc: Location.LocationObject, share?: Share |
   const s = share ?? (await getActiveShare());
   if (!s) return;
   const { latitude: lat, longitude: lng, accuracy } = loc.coords;
+  // fix_at is when the phone took the fix, so a delayed upload is shown as old, not as "now".
+  const fix_at = new Date(loc.timestamp || Date.now()).toISOString();
   if (s.alertId && !s.alertId.startsWith("local-")) {
-    await api("POST", `alerts/${s.alertId}/locations`, { lat, lng, accuracy });
+    await api("POST", `alerts/${s.alertId}/locations`, { lat, lng, accuracy, fix_at });
   }
   if (s.journeyId) {
-    await api("POST", `journeys/${s.journeyId}/location`, { lat, lng });
+    await api("POST", `journeys/${s.journeyId}/location`, { lat, lng, fix_at });
   }
 }
 

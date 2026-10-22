@@ -15,9 +15,16 @@ export const randomHex = (bytes: number) => crypto.randomBytes(bytes).toString("
 export const sha256Hex = (data: string | Uint8Array) => crypto.createHash("sha256").update(data).digest("hex");
 
 const B32 = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L to avoid misreading
+/** Uniformly random code (rejection sampling avoids modulo bias). */
 export function randomCode(len: number): string {
-  const bytes = crypto.randomBytes(len);
-  return [...bytes].map((b) => B32[b % B32.length]).join("");
+  const limit = 256 - (256 % B32.length);
+  let out = "";
+  while (out.length < len) {
+    for (const b of crypto.randomBytes(len * 2)) {
+      if (b < limit && out.length < len) out += B32[b % B32.length];
+    }
+  }
+  return out;
 }
 export function recoveryCode(): string {
   const raw = randomCode(16);
@@ -31,6 +38,14 @@ export async function hashPassword(password: string): Promise<string> {
     crypto.scrypt(password, salt, 64, { N: 16384, r: 8, p: 1 }, (e, k) => (e ? bad(e) : ok(k))),
   );
   return `scrypt$${salt.toString("base64")}$${key.toString("base64")}`;
+}
+
+// Verifying against this when an email doesn't exist keeps response times the same,
+// so timing doesn't reveal which emails have accounts.
+const DUMMY_HASH = "scrypt$AAAAAAAAAAAAAAAAAAAAAA==$" + Buffer.alloc(64).toString("base64");
+export async function verifyPasswordOrDummy(password: string, stored: string | null | undefined): Promise<boolean> {
+  const ok = await verifyPassword(password, stored ?? DUMMY_HASH);
+  return Boolean(stored) && ok;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {

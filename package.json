@@ -62,7 +62,10 @@
     "dev": "tsx scripts/dev-server.ts",
     "test:api": "node tests/run-api.mjs",
     "test:e2e": "node tests/run-e2e.mjs",
-    "test": "npm run -s typecheck && npx eslint src && npm run -s test:api"
+    "test": "npm run test:api && npm run test:db && npm run test:e2e",
+    "test:db": "tsx tests/migration.test.ts && node tests/backup-drill.test.mjs",
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore": "tsx scripts/restore.ts"
   },
   "private": true,
   "engines": {

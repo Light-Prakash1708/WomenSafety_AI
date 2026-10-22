@@ -77,3 +77,27 @@ Severity: **P0**, can cause a failed or false emergency response, or exposure of
 ## 4. Order of work
 
 Dependencies decide the order. Migrations (#13) come first because most fixes add columns. Then the P0 SOS fixes (#1–5, #17), then the remaining P1s (#3 UI, #6–12, #14), then Phase 3 (#15), then Phases 4–5 (#19–22). The campus dashboard (#23) and device verification (#24–26) are documented with what they need from people, because they can't be completed from code alone.
+
+## 5. Phase 2 result (P0/P1 hardening)
+
+The matrix above is the baseline as found. After Phase 2:
+
+| # | Now | Evidence |
+| --- | --- | --- |
+| 1 | Fixed. `client_ref` on every SOS; partial unique indexes `alerts_one_active`, `alerts_client_ref` | `safety.test.mjs`: same-ref retry, second SOS, 6 concurrent presses → one alert; e2e retried request |
+| 2 | Fixed. Generation counter stops a cancelled `start()`; cancel goes through a persistent outbox; `alerts/by-ref/:ref/cancel` wins even before the create (tombstone) | cancel-before-create, 8 concurrent create/cancel races |
+| 3 | Fixed. Devices without PINs ask for the account password (`auth/verify-password`, 10 tries / 15 min); `GET alerts/active` lets a new device find and end a running alert | e2e "new device" flow; API lockout test |
+| 4 | Fixed. Recipient states `queued, failed, device_compose, device_sent, provider_accepted, provider_delivered, link_opened, acknowledged`, forward-only | device-sms results, receipt → delivered, no downgrade after ack (mutation-checked) |
+| 5 | Fixed. `fix_at` stored, last location only moves forward, invalid / 0,0 / >24 h fixes rejected; stale flag after 120 s on track page, guardian view, her screen | 4 freshness tests |
+| 6 | Fixed. "Location is off" state on her SOS screen | manual / e2e screenshot |
+| 7 | Fixed. Ended alert hides name, location and recipients; 410 after 7 days; `rotate-link`; silent alerts expire after 24 h | tracking-link and expiry tests |
+| 8 | Fixed. 7-day invite expiry, join lockout (10/user, 30/IP per hour), rejection-sampled codes, owner sees who joined, "Revoke app access" | invite tests |
+| 9 | Fixed. IP limits on sign-up/login/recovery, sign out everywhere, constant-time unknown-email path, 200-char password cap | forged/expired/alg:none/typ/tv tokens, limits |
+| 10 | Fixed. Watchdog reuses the active alert; push retries capped at 3, permanent failures not retried; cron endpoint throttled | watchdog and retry tests |
+| 11 | Fixed. Quota 500 MB, exact part sizes, base64 check, no download before finish, abandoned uploads swept after 24 h | vault tests |
+| 12 | Fixed. `audit_log` (no locations or message text), readable by the owner in Settings → Activity | audit tests |
+| 13 | Fixed. Versioned migrations with retry on lock contention | `migration.test.ts` (v1 database with legacy rows, two concurrent instances) |
+| 14 | Fixed. `npm run db:backup` / `db:restore` (refuses non-empty target, detects truncation) | `backup-drill.test.mjs` |
+| 15, 24–26 | Unchanged: need credentials and real devices (Phases 3 and 7) | — |
+
+One bug was found by the new tests and fixed: a wrong password on the cancel-by-password screen returned 401, which the client treats as "session ended" and signed her out mid-emergency. It now returns 403.

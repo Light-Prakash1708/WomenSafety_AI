@@ -152,15 +152,117 @@ const SCHEMA = [
   `create table if not exists meta (key text primary key, value text)`,
 ];
 
+// ---------------------------------------------------------------------------
+// Versioned migrations. Each runs once and is recorded in schema_migrations.
+// Steps are idempotent so overlapping cold starts can't break a deploy:
+// ADD COLUMN checks the table first and tolerates "duplicate column".
+// Version 1 is the original schema, so existing databases upgrade in place.
+// ---------------------------------------------------------------------------
+type Step = string | { addColumn: [table: string, column: string, definition: string] };
+type Migration = { version: number; name: string; steps: Step[] };
+
+export const MIGRATIONS: Migration[] = [
+  { version: 1, name: "initial schema", steps: SCHEMA },
+  {
+    version: 2,
+    name: "P0 safety: idempotent SOS, truthful delivery states, location freshness, invite expiry, audit log, rate limits",
+    steps: [
+      { addColumn: ["alerts", "client_ref", "text"] },
+      { addColumn: ["alerts", "end_reason", "text"] },
+      { addColumn: ["alerts", "heartbeat_at", "text"] },
+      { addColumn: ["alerts", "last_received_at", "text"] },
+      { addColumn: ["alerts", "token_rotated_at", "text"] },
+      { addColumn: ["alert_locations", "received_at", "text"] },
+      { addColumn: ["alert_recipients", "attempts", "integer not null default 0"] },
+      { addColumn: ["alert_recipients", "last_attempt_at", "text"] },
+      { addColumn: ["alert_recipients", "error", "text"] },
+      { addColumn: ["alert_recipients", "provider", "text"] },
+      { addColumn: ["alert_recipients", "provider_ref", "text"] },
+      { addColumn: ["contacts", "invite_expires_at", "text"] },
+      { addColumn: ["contacts", "linked_at", "text"] },
+      // Old rows: "sent" only ever came from her own Messages app (or an accepted push ticket).
+      `update alert_recipients set status = 'device_compose' where status = 'sent' and channel = 'sms'`,
+      `update alert_recipients set status = 'provider_accepted' where status = 'sent' and channel = 'push'`,
+      `update alert_recipients set status = 'link_opened' where status = 'opened'`,
+      // At most one active alert per person. Resolve any historical duplicates first, keeping the newest.
+      `update alerts set status = 'resolved', end_reason = 'superseded', ended_at = coalesce(ended_at, started_at)
+         where status = 'active' and exists (
+           select 1 from alerts newer where newer.owner_id = alerts.owner_id and newer.status = 'active'
+              and (newer.started_at > alerts.started_at or (newer.started_at = alerts.started_at and newer.id > alerts.id)))`,
+      `create unique index if not exists alerts_one_active on alerts(owner_id) where status = 'active'`,
+      `create unique index if not exists alerts_client_ref on alerts(owner_id, client_ref) where client_ref is not null`,
+      `update contacts set invite_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+7 days') where invite_expires_at is null and linked_user_id is null`,
+      `update contacts set linked_at = created_at where linked_user_id is not null and linked_at is null`,
+      `create table if not exists rate_limits (key text not null, bucket integer not null, count integer not null default 0, expires integer not null default 0, primary key (key, bucket))`,
+      `create table if not exists audit_log (
+        id integer primary key autoincrement,
+        owner_id text not null,
+        actor_id text,
+        action text not null,
+        target_type text,
+        target_id text,
+        meta text,
+        at text not null
+      )`,
+      `create index if not exists audit_owner on audit_log(owner_id, at)`,
+    ],
+  },
+];
+
+export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
+
+async function columnExists(table: string, column: string): Promise<boolean> {
+  const r = await db().execute(`pragma table_info(${table})`);
+  return r.rows.some((row) => (row as unknown as { name: string }).name === column);
+}
+
+async function runStep(step: Step) {
+  if (typeof step === "string") {
+    await db().execute(step);
+    return;
+  }
+  const [table, column, definition] = step.addColumn;
+  if (await columnExists(table, column)) return;
+  try {
+    await db().execute(`alter table ${table} add column ${column} ${definition}`);
+  } catch (e) {
+    if (!/duplicate column/i.test(String((e as Error).message))) throw e;
+  }
+}
+
+async function runMigrations(): Promise<void> {
+  await db().execute(`create table if not exists schema_migrations (version integer primary key, name text not null, applied_at text not null)`);
+  const done = new Set(
+    (await db().execute(`select version from schema_migrations`)).rows.map((r) => Number((r as unknown as { version: number }).version)),
+  );
+  for (const m of MIGRATIONS) {
+    if (done.has(m.version)) continue;
+    for (const step of m.steps) await runStep(step);
+    await db().execute({ sql: `insert or ignore into schema_migrations (version, name, applied_at) values (?, ?, ?)`, args: [m.version, m.name, new Date().toISOString()] });
+    console.log(JSON.stringify({ event: "migration_applied", version: m.version, name: m.name }));
+  }
+}
+
+// Two instances cold-starting together can collide on the write lock (SQLITE_BUSY / "database is locked").
+// Every step is idempotent, so the loser waits briefly and runs again instead of failing a request.
+async function runMigrationsWithRetry(): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await runMigrations();
+    } catch (e) {
+      const busy = /SQLITE_BUSY|database is locked|locked/i.test(String((e as Error)?.message ?? e) + String((e as { code?: string })?.code ?? ""));
+      if (!busy || attempt >= 6) throw e;
+      await new Promise((r) => setTimeout(r, 100 * attempt + Math.random() * 100));
+    }
+  }
+}
+
 export function migrate(): Promise<void> {
   if (!migrated) {
-    migrated = db()
-      .batch(SCHEMA, "write")
-      .then(() => undefined)
-      .catch((e) => {
-        migrated = null;
-        throw e;
-      });
+    migrated = runMigrationsWithRetry().catch((e) => {
+      migrated = null;
+      throw e;
+    });
   }
   return migrated;
 }

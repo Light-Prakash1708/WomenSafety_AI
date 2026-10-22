@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import { Button, Card, ErrorText, Field, H1, Note, Screen, Sub } from "@/components/ui";
 import { mapsLink } from "@/lib/geo";
-import { api, type Recipient } from "@/lib/api";
+import { ageText, api, recipientLabel, type Recipient } from "@/lib/api";
 import { c, f } from "@/lib/theme";
 
-type A = { id: string; status: string; duress: boolean; last_lat: number | null; last_lng: number | null; last_accuracy: number | null; last_seen_at: string | null; started_at: string; battery: number | null };
+type A = { id: string; status: string; duress: boolean; last_lat: number | null; last_lng: number | null; last_accuracy: number | null; last_seen_at: string | null; started_at: string; battery: number | null; location_age_seconds?: number | null; location_stale?: boolean | null };
 
 export default function GuardianAlert() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -17,13 +17,11 @@ export default function GuardianAlert() {
   const [msg, setMsg] = useState("On my way");
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState("");
-  const [seen, setSeen] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const r = await api<{ alert: A; recipients: Recipient[] }>("GET", `alerts/${id}`).catch(() => null);
     const row = r?.alert ?? null;
     setAlert(row);
-    setSeen(row?.last_seen_at ? Math.round((Date.now() - +new Date(row.last_seen_at)) / 60000) : null);
     setRecips(r?.recipients ?? []);
   }, [id]);
 
@@ -71,9 +69,14 @@ export default function GuardianAlert() {
       <Card bg={c.sage}>
         <Text style={{ fontFamily: f.displayBold, fontSize: 17, color: c.ink }}>Last location</Text>
         <Text style={{ fontFamily: f.body, fontSize: 13.5, color: c.ink, marginTop: 3 }}>
-          {alert.last_lat != null ? `±${Math.round(alert.last_accuracy ?? 0)} m · ${seen === 0 ? "just now" : `${seen} min ago`}` : "Waiting for her phone to send a location"}
+          {alert.last_lat != null ? `±${Math.round(alert.last_accuracy ?? 0)} m · taken ${ageText(alert.location_age_seconds)}` : "Waiting for her phone to send a location"}
           {alert.battery != null ? ` · battery ${Math.round(alert.battery * 100)}%` : ""}
         </Text>
+        {alert.location_stale && (
+          <Text style={{ fontFamily: f.bodyBold, fontSize: 13, color: c.ink, marginTop: 6 }}>
+            This location is old. She may have moved, or her phone may have lost signal. Call her, then 112 if you can't reach her.
+          </Text>
+        )}
         {alert.last_lat != null && (
           <Button label="Open in Maps" style={{ marginTop: 12 }} onPress={() => Linking.openURL(mapsLink(alert.last_lat!, alert.last_lng!))} />
         )}
@@ -88,7 +91,8 @@ export default function GuardianAlert() {
         <Text style={{ fontFamily: f.bodyBold, fontSize: 14, color: c.ink, marginBottom: 6 }}>Who else was asked</Text>
         {recips.map((r) => (
           <Text key={r.id} style={{ fontFamily: f.body, fontSize: 13.5, color: c.ink }}>
-            {r.name}: {r.status === "acknowledged" ? `on it${r.message ? ` ("${r.message}")` : ""}` : r.status}
+            {r.name}: {recipientLabel(r.status).label}
+            {r.message ? ` ("${r.message}")` : ""}
           </Text>
         ))}
       </Card>

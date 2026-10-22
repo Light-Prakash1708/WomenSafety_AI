@@ -10,7 +10,7 @@ const port = 3100 + Math.floor(Math.random() * 800);
 const base = `http://127.0.0.1:${port}`;
 
 const server = spawn(process.execPath, [path.resolve("node_modules/tsx/dist/cli.mjs"), "scripts/dev-server.ts"], {
-  env: { ...process.env, PORT: String(port), TURSO_DATABASE_URL: `file:${db}`, TURSO_AUTH_TOKEN: "", JWT_SECRET: "test-secret-for-ci-only", ANTHROPIC_API_KEY: "", SAAHI_DISABLE_PUSH: "1" },
+  env: { ...process.env, PORT: String(port), TURSO_DATABASE_URL: `file:${db}`, TURSO_AUTH_TOKEN: "", JWT_SECRET: "test-secret-for-ci-only", ANTHROPIC_API_KEY: "", SAAHI_PUSH_MODE: "fake" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let log = "";
@@ -36,11 +36,11 @@ if (!up) {
   process.exit(1);
 }
 
-const files = process.argv.slice(2).length ? process.argv.slice(2) : ["tests/api.test.mjs"];
+const files = process.argv.slice(2).length ? process.argv.slice(2) : ["tests/api.test.mjs", "tests/safety.test.mjs"];
 let failed = false;
 for (const f of files) {
   const code = await new Promise((res) => {
-    const t = spawn(process.execPath, [f], { env: { ...process.env, BASE: base, TEST_DB: db }, stdio: "inherit" });
+    const t = spawn(process.execPath, [f], { env: { ...process.env, BASE: base, TEST_DB: db, JWT_SECRET: "test-secret-for-ci-only" }, stdio: "inherit" });
     t.on("exit", res);
   });
   if (code !== 0) failed = true;
