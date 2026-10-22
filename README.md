@@ -109,7 +109,7 @@ Quick exit also renames the browser tab to "Calculator".
 2. Add the **Turso** integration from the Vercel Marketplace and connect it to the project. It adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`; that's all SAAHI needs. Tables are created automatically on the first request.
 3. Optional environment variables:
    - `ANTHROPIC_API_KEY`: AI-written pattern summaries and the multilingual guide. Without it, SAAHI uses built-in summaries and curated answers.
-   - `JWT_SECRET`: a long random string for signing sessions. If unset, one is derived from your Turso token. Changing either signs everyone out.
+   - `JWT_SECRET`: a long random string for signing sessions. **Set this for any real use.** If unset, one is derived from your Turso token, so rotating that token signs everyone out.
 4. Deploy. Check `https://<your-project>.vercel.app/api/health` returns `{"ok":true}`.
 
 #### Watchdog timing
@@ -183,23 +183,35 @@ Privacy rules on the server:
 
 ## Tested
 
-This version was tested end to end with the real API handler running against a local libSQL database (the same engine as Turso), with routing set up exactly like `vercel.json`:
+Every push runs the full suite in GitHub Actions. Details and what each test proves: [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
 
-- **91 API checks passed**: sign-up, sign-in, lockout after 10 wrong passwords, recovery-code reset (which signs out old sessions), forged-token rejection, every account seeing only its own data, guardian invite codes (wrong, own, reused, rotated), SOS with recipients and tracking link, location updates, guardian view and "On it", the public tracking link, duress, real cancel hiding location, pattern entries and AI-summary fallback, the guide, chunked vault upload with server-side SHA-256 check (a tampered file is rejected), downloads reassembling the exact bytes, the 25 MB limit, the 3-reporter area threshold, the watchdog (no double alerts), and full account deletion.
-- **The web app was driven in Chromium at phone size (390 × 844, 56 checks) and laptop size (1440 × 900, 58 checks)**, all passing, with a check on every screen that nothing crosses the screen edge or scrolls sideways, and a check that going offline still opens the app (not a cached tracking page). Flows: create account and recovery code, onboarding, guardian code, language switch, hold-to-SOS, the helper's tracking page, "2 people are coming", wrong and duress PINs, the hidden alert, real cancel, pattern and summary, journeys, vault fingerprints and SOS audio, area reports, calculator, ghost call, deleting the account.
-- The compiled Vercel function was loaded in Node in CommonJS form, the way Vercel runs it, against both a local database and a `libsql://` Turso URL.
+- **API (229 checks)**: `tests/api.test.mjs` (core flows), `tests/safety.test.mjs` (duplicate and concurrent SOS, cancel before create, duress, truthful delivery states, stale locations, link expiry and rotation, cross-account access, forged and expired tokens, rate limits, push retries, watchdog, vault validation and quota, audit trail) and `tests/records.test.mjs` (entry corrections with history, summary staleness, community report privacy and moderation).
+- **Database**: upgrade from the original schema under two concurrent instances (`tests/migration.test.ts`) and a backup → restore drill (`tests/backup-drill.test.mjs`).
+- **Browser**: the whole journey in Chromium at phone and laptop size, including cancelling from a second device with a password, with an edge-overflow check on every screen.
 
-Not covered, so test on real phones: SMS sending, push delivery, background location with the screen locked, and shake to SOS.
+Not verified yet, because it needs real phones and credentials: push delivery, SMS from the phone, background location when locked, shake to SOS. See [`docs/DEVICE_TEST_MATRIX.md`](docs/DEVICE_TEST_MATRIX.md).
+
+## Documentation
+
+| Doc | What it covers |
+| --- | --- |
+| [`docs/AUDIT.md`](docs/AUDIT.md) | Baseline audit, implementation matrix, what Phase 2 fixed |
+| [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) | Verified vs untested, blockers, actions needing approval |
+| [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md) | Delivery states, push retries, India DLT steps for server SMS |
+| [`docs/VAULT_ENCRYPTION.md`](docs/VAULT_ENCRYPTION.md) | Encryption design for review (not deployed) |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Deploys, migrations, backups, rollback, monitoring, incidents |
+| [`docs/DEVICE_TEST_MATRIX.md`](docs/DEVICE_TEST_MATRIX.md) | Real-device cases to run before relying on it |
+| [`docs/CAMPUS_DASHBOARD.md`](docs/CAMPUS_DASHBOARD.md) | Institution dashboard design (not built) |
 
 ## Known limits in v0.1
 
 Be upfront about these with testers:
 
-- **SMS needs a tap.** iOS and Android don't let apps send texts silently, so the Messages app opens prefilled and she must tap Send. Push to guardians is instant. For fully automatic SMS, add a provider like MSG91 or Twilio (with DLT registration in India) in `server/push.ts`.
+- **SMS needs a tap.** iOS and Android don't let apps send texts silently, so the Messages app opens prefilled and she must tap Send. Push to guardians is instant. Server-sent SMS needs DLT registration and a gateway; see `docs/NOTIFICATIONS.md`. Delivery labels only claim what the phone or a provider confirmed.
 - **Shake to SOS works only while SAAHI is open.** A lock-screen trigger, volume-button trigger or voice safe word needs custom native code and real-device testing.
 - **Background location depends on permissions.** On Android she must choose "Allow all the time". Some phone brands (Xiaomi, Oppo, Vivo) kill background apps aggressively; test on them.
 - **The watchdog can only push.** If her phone dies during a journey, contacts *with the app* are alerted; others need an SMS provider.
-- **Vault files are private but not end-to-end encrypted.** They're stored in your Turso database, only reachable through her signed-in account, and encrypted at rest by Turso. Client-side encryption is on the roadmap.
+- **Vault files are private but not end-to-end encrypted.** They're stored in your Turso database and only reachable through her signed-in account. Client-side encryption is designed in `docs/VAULT_ENCRYPTION.md` and needs an independent review before it ships.
 - **Password reset needs the recovery code.** There's no email reset yet, because that needs an email provider (such as Resend). If she loses both her password and her code, the account can't be recovered.
 - **Legal review.** Before a real launch in India, get advice on the DPDP Act 2023, evidence handling, mandatory reporting and child protection.
 
@@ -208,7 +220,7 @@ Be upfront about these with testers:
 1. Campus dashboard for security desks and ICCs (the first paying customer).
 2. Verified responder network with training and audit trails.
 3. Bluetooth panic button pairing.
-4. End-to-end encrypted vault.
+4. End-to-end encrypted vault (after review of the design).
 5. Automatic SMS through an Indian provider.
 
 ## Development
@@ -216,11 +228,14 @@ Be upfront about these with testers:
 ```bash
 npm run typecheck                    # app and server
 npx eslint src
-npx expo export --platform android   # checks the phone bundle builds
+npm run test:api                     # API suites against a local libSQL database
+npm run test:db                      # migration upgrade + backup/restore drill
+npm run build:web && npm run test:e2e   # browser tests (needs Python Playwright)
 npm run build:web && npm run dev     # full app + API on http://localhost:3000
+npm run db:backup -- out.jsonl.gz    # logical backup (see docs/OPERATIONS.md)
 ```
 
-CI runs all three on every push.
+CI runs all of these on every push.
 
 ## License
 
